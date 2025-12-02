@@ -731,7 +731,12 @@ def firebox_vmap(gal_id, res, min_cden=14.):
     Create a velocity map for bound gas in a given FIREBox galaxy with the same
     field of view as Courtney's image of that galaxy. If the FIREBox data file
     doesn't exist in firebox_data_dir/objects_1200 or if the galaxy has no
-    bound particles, the function returns None.
+    bound gas particles, the function returns None. Note that while
+    UCITools.firebox_io.get_avg_sfrs (incidentally in the Julia portion of this
+    repo), may
+    successfully find bound star particles for a given galaxy, firebox_vmap
+    may fail to find
+    bound gas particles, or vice versa.
 
     Parameters
     ----------
@@ -928,8 +933,8 @@ def load_firebox_vmap(gal_id, res, min_cden):
         for i, (name, obj) in enumerate(f.items()):
             if isinstance(obj, h5py.Group):
                 vmap = obj['vmap'][()]
-                horiz_edges = obj['horiz_edges']
-                vert_edges = obj['vert_edges']
+                horiz_edges = obj['horiz_edges'][()]
+                vert_edges = obj['vert_edges'][()]
                 
                 vmax = np.nanmax(vmap)
                 vmin = -1. * vmax
@@ -954,4 +959,65 @@ def load_firebox_vmap(gal_id, res, min_cden):
                     ax=axs[i],
                     label=r'Gas LOS Velocity [kms$^{-1}]$'
                 )
+    return None
+
+def imshow_firebox_vmap(gal_id, res, min_cden):
+    '''
+    Display the bound-gas velocity map that `save_all_firebox_vmaps` generated
+    for the given galaxy.
+
+    Parameters
+    ----------
+    gal_id: int
+        FIREBox galaxy unique ID
+    res: int
+        The number of pixels the velocity map has along each axis.
+    min_cden: float, default 14.
+        The minimum column density in M_sun / pc^2 with which
+        `save_all_firebox_vmaps` generated the velocity map. That function sets
+        pixels that are below the minimum density to np.nan.
+
+    Returns
+    -------
+    None
+    '''
+    from . import config
+    import os
+    import h5py
+    import numpy as np
+    from matplotlib import pyplot as plt
+    maps_dir = os.path.join(
+        config.config[f'{__package__}_paths']['data_dir'],
+        'vmaps_res{0:0.0f}_min_cden{1:0.1e}'.format(res, min_cden)
+    )
+
+    orientation_d = {
+        'projection_xy': {'h': 0, 'v': 1},
+        'projection_yz': {'h': 1, 'v': 2},
+        'projection_zx': {'h': 2, 'v': 0}
+    }
+    axes_d = {0: '$x$', 1: '$y$', 2: '$z$'}
+
+    fig, axs = plt.subplots(1, 3, figsize=(16, 4), sharex=True, sharey=True)
+
+    path = os.path.join(maps_dir, f'object_{gal_id}_vmap.hdf5')
+    with h5py.File(path, 'r') as f:
+        for i, (name, obj) in enumerate(f.items()):
+            if isinstance(obj, h5py.Group):
+                vmap = obj['vmap'][()]
+                horiz_edges = obj['horiz_edges'][()]
+                vert_edges = obj['vert_edges'][()]
+                
+                vmax = np.nanmax(vmap)
+                vmin = -1. * vmax
+
+                axs[i].imshow(vmap)
+                axs[i].set_xlabel(
+                    '{0} [kpc]'.format(axes_d[orientation_d[name]['h']])
+                )
+                axs[i].set_ylabel(
+                    '{0} [kpc]'.format(axes_d[orientation_d[name]['v']])
+                )
+                axs[i].set_aspect('equal', adjustable='box')
+    plt.show()
     return None

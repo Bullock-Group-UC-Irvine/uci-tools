@@ -299,7 +299,7 @@ function get_sfrs(
 end
 
 function get_avg_sfrs(ids, grp_ids)
-    uci = PyCall.pyimport("UCI_tools")    
+    uci = PyCall.pyimport("uci_tools")    
     cosmo = PyCall.pyimport("astropy.cosmology")
     astropy = PyCall.pyimport("astropy")
 

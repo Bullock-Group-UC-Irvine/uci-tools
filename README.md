@@ -1,4 +1,4 @@
-# UCI-tools
+# uci-tools
 General-purpose code expected to be useful for multiple group members.
 
 Install in your active environment with `pip install .`.

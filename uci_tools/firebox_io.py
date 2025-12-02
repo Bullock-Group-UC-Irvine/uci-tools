@@ -147,12 +147,13 @@ def load_particle(
                 intersect1d,
                 indices,
                 comm2
-            ) = intersection = np.intersect1d(
+            ) np.intersect1d(
                 ids,
                 bound_ids,
                 assume_unique=False,
                 return_indices=True
             )
+            print(intersect1d)
             coords = coords[indices]
             vs = vs[indices]
             ms = ms[indices]

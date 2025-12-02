@@ -103,20 +103,23 @@ def ensure_user_config():
         )
         print(f'host_2d_shapes added to {__package__}_paths')
 
-    if not config.has_option(f'{__package__}_paths', 'sat_2d_shapes'):
-        config.set(
-            f'{__package__}_paths',
-            'sat_2d_shapes',
-            '/DFS-L/DATA/cosmo/kleinca/data/'
-                'DataWithMockImagesWithBadExtinction/'
-                'AstroPhot_Sate_Sersic_AllMeasure.csv'
-        )
-        print(f'sat_2d_shapes added to {__package__}_paths')
+    ensure_key(
+        config,
+        'sat_2d_shapes',
+        '/DFS-L/DATA/cosmo/kleinca/data/'
+            'DataWithMockImagesWithBadExtinction/'
+            'AstroPhot_Sate_Sersic_AllMeasure.csv'
+    )
 
     with open(config_path, 'w') as f:
         config.write(f)
 
     return config_path
+
+def ensure_key(config, key, path):
+    if not config.has_option(f'{__package__}_paths', key):
+        config.set(f'{__package__}_paths', key, path)
+        print(f'{key} added to {__package__}_paths')
 
 def load_config():
     '''
