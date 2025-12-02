@@ -147,7 +147,7 @@ def load_particle(
                 intersect1d,
                 indices,
                 comm2
-            ) np.intersect1d(
+            ) = np.intersect1d(
                 ids,
                 bound_ids,
                 assume_unique=False,
