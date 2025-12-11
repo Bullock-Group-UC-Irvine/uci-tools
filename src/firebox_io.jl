@@ -9,23 +9,13 @@ import DataFrames
 import CSV
 import Statistics
 import IndexedDataFrames
+import ..UCIToolsConfig
 
 ENV["GKSwstype"] = "100"
 
-configer = PyCall.pyimport("uci_tools.config")
-config = configer.config
-super_direc = PyCall.pycall(
-    config.get,
-    String,
-    "uci_tools_paths",
-    "firebox_data_dir"
-)
-output_dir = PyCall.pycall(
-    config.get,
-    String,
-    "uci_tools_paths",
-    "project_data_dir"
-)
+conf = UCIToolsConfig.read_config()
+super_direc = conf["uci_tools_paths"]["firebox_data_dir"]
+output_dir = conf["uci_tools_paths"]["project_data_dir"]
 
 function get_grp_id(gal_id)
     fname = super_direc * 

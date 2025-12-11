@@ -1,6 +1,6 @@
 name = "UCITools"
 uuid = "6d190016-b2d6-499f-b0d4-4be18205686c"
-version = "2.2.0-b0"
+version = "2.2.0-b1"
 authors = ["Patrick Staudt <patrickstaudt1@gmail.com>"]
 
 [deps]
