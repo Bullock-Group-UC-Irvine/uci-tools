@@ -4,8 +4,10 @@ import configparser
 env_str = os.getenv('CONDA_DEFAULT_ENV', 'base')
 if env_str == 'base':
     env_suffix = ''
+    env_prefix = ''
 else:
     env_suffix = '_' + env_str
+    env_prefix = env_str + '_'
 home = os.path.expanduser(os.path.join(
     '~/'
 ))
@@ -45,23 +47,12 @@ def ensure_user_config():
             f' and you must properly configure {config_fname}.\n'
         )
 
-    if not config.has_option(f'{__package__}_paths', 'output_dir'):
-        output_dname = 'output' + env_suffix
-        output_dir = os.path.join(home, output_dname)
-        config.set(f'{__package__}_paths', 'output_dir', output_dir)
-        if not os.path.isdir(output_dir):
-            os.makedirs(output_dir)
-            print(f'{output_dir} created')
-        print(f'output_dir added to {__package__}_paths')
-
-    if not config.has_option(f'{__package__}_paths', 'data_dir'):
-        output_dname = 'output' + env_suffix
-        data_dir = os.path.join(home, output_dname)
-        config.set(f'{__package__}_paths', 'data_dir', data_dir)
-        if not os.path.isdir(data_dir):
-            os.makedirs(data_dir)
-            print(f'{data_dir} created')
-        print(f'data_dir added to {__package__}_paths')
+    ensure_key(
+        config,
+        'project_data_dir',
+        os.path.join(home, env_prefix + 'data'),
+        ensure_exists=True
+    )
 
     if not config.has_option(f'{__package__}_paths', 'snap_times'):
         snap_times_path = (
@@ -116,8 +107,11 @@ def ensure_user_config():
 
     return config_path
 
-def ensure_key(config, key, path):
+def ensure_key(config, key, path, ensure_exists=False):
     if not config.has_option(f'{__package__}_paths', key):
+        if ensure_exists and not os.path.isdir(path):
+            os.makedirs(path)
+            print(f'{path} created.')
         config.set(f'{__package__}_paths', key, path)
         print(f'{key} added to {__package__}_paths')
 

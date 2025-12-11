@@ -507,7 +507,7 @@ def plot(
         is np.nan.
     save_plot: bool, default True
         Whether to save the plot to disk. If True, the code will save the plot
-        in the `output_dir` directory specified in the user's 
+        in the `project_data_dir` directory specified in the user's 
         config.ini file in
         their home directory. 
     show_plot: bool, default True
@@ -707,7 +707,7 @@ def plot(
 
         if save_plot:
             plt.savefig(os.path.join(
-                config.config['uci_tools_paths']['output_dir'], 
+                config.config['uci_tools_paths']['project_data_dir'], 
                 'vel_map_{0}_snap{1}.png'.format(display_name.lower(), snap)
             ))
         if show_plot:
@@ -787,7 +787,7 @@ def firebox_vmap(gal_id, res, min_cden=14.):
     
     super_dir = config.config[f'{__package__}_paths']['firebox_data_dir']
     output_dir = os.path.join(
-        config.config[f'{__package__}_paths']['output_dir'],
+        config.config[f'{__package__}_paths']['project_data_dir'],
         'vmaps_res{0:0.0f}_min_cden{1:0.1e}'.format(res, min_cden)
     )
 
@@ -861,7 +861,7 @@ def save_all_firebox_vmaps(res, min_cden=14.):
     view for each map corresponds to the field of view in
     Courtney's mock image for the corresponding galaxy. The code saves the maps
     in
-    output_dir/vmaps_res{res}_min_cden{min_cden}.
+    project_data_dir/vmaps_res{res}_min_cden{min_cden}.
 
     Parameters
     ----------
@@ -915,7 +915,7 @@ def load_firebox_vmap(gal_id, res, min_cden):
     import numpy as np
     from matplotlib import pyplot as plt
     maps_dir = os.path.join(
-        config.config[f'{__package__}_paths']['data_dir'],
+        config.config[f'{__package__}_paths']['project_data_dir'],
         'vmaps_res{0:0.0f}_min_cden{1:0.1e}'.format(res, min_cden)
     )
 
@@ -987,7 +987,7 @@ def imshow_firebox_vmap(gal_id, res, min_cden):
     import numpy as np
     from matplotlib import pyplot as plt
     maps_dir = os.path.join(
-        config.config[f'{__package__}_paths']['data_dir'],
+        config.config[f'{__package__}_paths']['project_data_dir'],
         'vmaps_res{0:0.0f}_min_cden{1:0.1e}'.format(res, min_cden)
     )
 

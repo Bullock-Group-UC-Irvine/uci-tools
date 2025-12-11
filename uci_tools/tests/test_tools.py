@@ -123,10 +123,10 @@ class TestFireIO(unittest.TestCase):
 
 @pytest.fixture(scope='session', autouse=True)
 def run_tests():
-    # The output_dir specified in the ci_config.ini is meant to be temporary.
+    # The project_data_dir specified in the ci_config.ini is meant to be temporary.
     # We'll
     # delete it at the end of the code unless by coincidence it exists already.
-    output_dir = uci.config.config[f'uci_tools_paths']['output_dir']
+    output_dir = uci.config.config[f'uci_tools_paths']['project_data_dir']
     if not os.path.isdir(output_dir):
         temp_dir = True
         os.mkdir(output_dir)
