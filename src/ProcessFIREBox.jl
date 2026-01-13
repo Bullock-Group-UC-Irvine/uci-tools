@@ -22,7 +22,8 @@ function get_sfrs(
             ids,
             grp_ids;
             make_plots=true,
-            verbose=false
+            verbose=false,
+            only_bound=false
         )
     df = DataFrames.DataFrame(
         id=ids,
@@ -66,7 +67,7 @@ function get_sfrs(
                 deleteat!(idf, gal_id)
                 continue # Skip this galaxy.
             end
-            if grp_id != -1
+            if Int(grp_id) != -1 && only_bound
                 # If the galaxy is not a host, filter for only bound particles.
                 bound_ids = firebox_io.get_bound_particles(gal_id)
                 # Narrow down the bound gas IDs so the `in.` below is faster.
@@ -130,13 +131,37 @@ function get_sfrs(
 
     println("\n$(length(missing_files)) missing satellite files:") 
     println(missing_files)
-    println(
-        "\n$(length(zero_bound)) satellites with no overlap with" *
-        " bound_particle file:"
-    )
-    println(zero_bound)
+    if only_bound
+        println(
+            "\n$(length(zero_bound)) satellites with no overlap with" *
+            " bound_particle file:"
+        )
+        println(zero_bound)
+    end
     
     return idf
+end
+
+function get_all_sfrs(;save=false)
+    gal_ids, grp_ids = firebox_io.get_both()
+    sfr_df = get_sfrs(gal_ids, grp_ids, make_plots=false, only_bound=false)
+    if save
+        CSV.write(
+            joinpath(output_dir, "inst_sfrs_no_bound_filter.csv"),
+            sfr_df.df
+        )
+    end
+    return sfr_df
+end
+
+function compare_sats_b4_filtering()
+    gal_ids, grp_ids = firebox_io.get_sats()
+    sfr_df = get_sfrs(
+        gal_ids,
+        grp_ids,
+        make_plots=false,
+    )
+    return sfr_df
 end
 
 function get_avg_sfrs(ids, grp_ids, age; only_bound=false)
@@ -240,16 +265,6 @@ function get_avg_sfrs(ids, grp_ids, age; only_bound=false)
     return idf
 end
 
-function compare_sats_b4_filtering()
-    gal_ids, grp_ids = firebox_io.get_sats()
-    sfr_df = get_sfrs(
-        gal_ids,
-        grp_ids,
-        make_plots=false,
-    )
-    return sfr_df
-end
-
 function get_all_avg_sfrs(age; save=false, debug_mode=false)
     gal_ids, grp_ids = firebox_io.get_both()
     if debug_mode
@@ -265,15 +280,6 @@ function get_all_avg_sfrs(age; save=false, debug_mode=false)
             ),
             sfr_df.df
         )
-    end
-    return sfr_df
-end
-
-function get_all_sfrs(;save=false)
-    gal_ids, grp_ids = firebox_io.get_both()
-    sfr_df = get_sfrs(gal_ids, grp_ids, make_plots=true)
-    if save
-        CSV.write(joinpath(output_dir, "sfrs.csv"), sfr_df.df)
     end
     return sfr_df
 end
