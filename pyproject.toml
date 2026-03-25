@@ -1,3 +1,43 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=45", "setuptools-scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "uci_tools"
+dynamic = ["version"]
+description = "Software tools developed by and commonly used by the group."
+readme = "README.md"
+authors = [
+    {name = "Patrick Staudt", email = "patrickstaudt1@gmail.com"},
+    {name = "UCI Bullock Galaxy Dark Matter Group", email = "bullock@uci.edu"},
+]
+license = {text = ""}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "pandas",
+    "h5py",
+    "progressbar",
+    "nbformat",
+    "astropy",
+    "tqdm",
+]
+
+[project.urls]
+Homepage = "https://github.com/Bullock-Group-UC-Irvine/shared-analysis-tools"
+
+[project.scripts]
+uci-tools-refactor = "uci_tools.refactor:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.setuptools_scm]
+version_file = "uci_tools/_version.py"
+
+[tool.pytest.ini_options]
+testpaths = ["uci_tools/tests"]

@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
+
 def load_grp_ids():
     from . import config
     data_dir = config.config.get(f'{__package__}_paths', 'firebox_data_dir')
@@ -20,6 +21,7 @@ def load_grp_ids():
         ids = f['galaxyID'][()].astype(int)
     df = pd.DataFrame(d, index=ids)
     return df
+
 
 def find_gal_in_direc(gal_id, direc):
     all_files = np.array(
@@ -37,6 +39,7 @@ def find_gal_in_direc(gal_id, direc):
     else:
         return 0
 
+
 def get_gal_path(gal_id):
     '''
     Get the path to the image of the given galaxy.
@@ -50,6 +53,7 @@ def get_gal_path(gal_id):
     if path == 0:
         raise(Exception('Galaxy not found.'))
     return path
+
 
 def show_gal(gal_id):
     path = get_gal_path(gal_id)
@@ -80,6 +84,7 @@ def show_gal(gal_id):
 
     return None
 
+
 def get_fov(gal_id):
     import h5py
     import pandas as pd
@@ -106,60 +111,93 @@ def get_fov(gal_id):
 
     return fov
 
-def load_particle(
-        particle_str,
-        f,
-        gal_id,
-        horiz_axis,
-        vert_axis,
-        only_bound=True):
-    import numpy as np
+# Maps the particle_type argument of load_particles to the HDF5 key
+# prefix and the partTypes integer used in the ahf bound-filter file.
+_PARTICLE_INFO = {
+    'gas':     {'prefix': 'gas',      'part_type': 0},
+    'stellar': {'prefix': 'stellar',  'part_type': 4},
+}
 
-    ys = f[particle_str + '_y'][()]
-    zs = f[particle_str + '_z'][()]
-    xs = f[particle_str + '_x'][()]
-    vxs = f[particle_str + '_vx'][()]
-    vys = f[particle_str + '_vy'][()]
-    vzs = f[particle_str + '_vz'][()]
-    ms = f[particle_str + '_mass'][()]
-    ids = f[particle_str + '_id'][()]
 
-    coords = np.array([xs, ys, zs]).T
-    vs = np.array([vxs, vys, vzs]).T
-    
-    proj_coords = coords[:, [horiz_axis, vert_axis]]
-    dists_2d = np.linalg.norm(proj_coords, axis=1)
-    fov = get_fov(gal_id)
-    in_fov = np.abs(dists_2d) <= fov / 2.
-    
-    coords = coords[in_fov]
-    vs = vs[in_fov]
-    ms = ms[in_fov]
-    ids = ids[in_fov]
+def load_particles(particle_type, obj_path, only_bound=True):
+    '''
+    Load particles of the given type from a FIREBox HDF5 file without
+    FOV filtering. The caller applies the FOV filter after any
+    rotation. When only_bound is True, the function looks for the
+    bound_particle_filters file in the same directory as obj_path and
+    filters to bound particles; if that file does not exist, the
+    function returns all particles.
+
+    Parameters
+    ----------
+    particle_type: str, {'gas', 'stellar'}
+        The type of particles to load.
+    obj_path: str
+        Path to a particles_within_Rvir HDF5 file.
+    only_bound: bool, default True
+        When True, filter to bound particles using the
+        bound_particle_filters file in the same directory.
+
+    Returns
+    -------
+    coords: np.ndarray, shape (N, 3)
+        Particle coordinates in physical kpc.
+    vs: np.ndarray, shape (N, 3)
+        Particle velocities in km/s.
+    ms: np.ndarray, shape (N,)
+        Particle masses in units of 1e10 Msun.
+    ids: np.ndarray, shape (N,)
+        Particle IDs.
+    '''
+    if particle_type not in _PARTICLE_INFO:
+        raise ValueError(
+            f'particle_type must be one of '
+            f'{list(_PARTICLE_INFO)}, got {particle_type!r}'
+        )
+    pfx       = _PARTICLE_INFO[particle_type]['prefix']
+    part_type = _PARTICLE_INFO[particle_type]['part_type']
+    h = 0.6774
+
+    with h5py.File(obj_path, 'r') as f:
+        z_snap = f['redshift'][()]
+        a_snap = 1. / (1. + z_snap)
+        length_conv = a_snap / h
+
+        xs  = f[pfx + '_x'][()]
+        ys  = f[pfx + '_y'][()]
+        zs  = f[pfx + '_z'][()]
+        vxs = f[pfx + '_vx'][()]
+        vys = f[pfx + '_vy'][()]
+        vzs = f[pfx + '_vz'][()]
+        ms_raw = f[pfx + '_mass'][()]
+        ids    = f[pfx + '_id'][()]
 
     if only_bound:
-        grp_id = load_grp_ids().loc[gal_id, 'grp_id']
-
-        if grp_id != -1:
-            # If it's a satellite, get only bound particles
-            bound_ids = get_bound_particles(gal_id)
-            (
-                intersect1d,
-                indices,
-                comm2
-            ) = np.intersect1d(
+        ahf_name = os.path.basename(obj_path).replace(
+            'particles_within_Rvir_', 'bound_particle_filters_',
+        )
+        ahf_path = os.path.join(os.path.dirname(obj_path), ahf_name)
+        if os.path.exists(ahf_path):
+            with h5py.File(ahf_path, 'r') as ahf:
+                bound_ids = ahf['particleIDs'][
+                    ahf['partTypes'][()] == part_type
+                ]
+            _, idx, _ = np.intersect1d(
                 ids,
                 bound_ids,
                 assume_unique=False,
-                return_indices=True
+                return_indices=True,
             )
-            print(intersect1d)
-            coords = coords[indices]
-            vs = vs[indices]
-            ms = ms[indices]
-            ids = ids[indices]
+            xs,  ys,  zs  = xs[idx],  ys[idx],  zs[idx]
+            vxs, vys, vzs = vxs[idx], vys[idx], vzs[idx]
+            ms_raw = ms_raw[idx]
+            ids    = ids[idx]
 
-    return coords, vs, ms, ids, fov
+    coords = np.column_stack([xs, ys, zs]) * length_conv
+    vs     = np.column_stack([vxs, vys, vzs])
+    ms     = ms_raw / h
+    return coords, vs, ms, ids
+
 
 def get_bound_particles(gal_id):
     from . import config

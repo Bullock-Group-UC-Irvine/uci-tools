@@ -1,3 +1,74 @@
+def save_rotation_matrix_data(test_data_dir):
+    '''
+    Generate expected rotation matrix values using the old
+    vrrotvec/vrrotvec2mat implementation and save them to an HDF5
+    file for use in tests that verify backward compatibility after
+    the rotation_matrix_fr_vecs rewrite.
+
+    This function omits the parallel and antiparallel cases. For
+    both, vrrotvec returns a zero-length rotation axis, which causes
+    vrrotvec2mat to divide by zero and produce NaN. Unit tests for
+    those degenerate cases verify only that the new implementation
+    satisfies the required mathematical properties (R @ a_hat ==
+    b_hat, R.T @ R == I, det(R) == 1).
+
+    Run this utility once before changing rotate_galaxy.py, then
+    commit the generated HDF5 file alongside the new tests.
+
+    Usage
+    -----
+    from uci_tools.tests.utils import save_rotation_matrix_data
+    save_rotation_matrix_data('uci_tools/tests/test_data')
+    '''
+    import os
+    import h5py
+    import numpy as np
+    from uci_tools.rotate_galaxy import vrrotvec, vrrotvec2mat
+
+    # Each tuple: (dataset_name, source_vector_a, target_vector_b).
+    # The old code normalizes internally through vrrotvec, so we
+    # pass the vectors as-is and normalize before storing so the
+    # tests work with unit vectors.
+    test_cases = [
+        (
+            'x_to_z',
+            np.array([1., 0., 0.]),
+            np.array([0., 0., 1.]),
+        ),
+        (
+            'y_to_x',
+            np.array([0., 1., 0.]),
+            np.array([1., 0., 0.]),
+        ),
+        (
+            'ppp_to_z',
+            np.array([1., 1., 1.]) / np.sqrt(3.),
+            np.array([0., 0., 1.]),
+        ),
+        (
+            'unnorm_to_y',
+            np.array([3., 0., 4.]),
+            np.array([0., 1., 0.]),
+        ),
+    ]
+
+    os.makedirs(test_data_dir, exist_ok=True)
+    path = os.path.join(test_data_dir, 'rotation_matrices.hdf5')
+
+    with h5py.File(path, 'w') as f:
+        for name, a, b in test_cases:
+            an = a / np.linalg.norm(a)
+            bn = b / np.linalg.norm(b)
+            R = vrrotvec2mat(vrrotvec(an, bn))
+            grp = f.create_group(name)
+            grp.create_dataset('a', data=an)
+            grp.create_dataset('b', data=bn)
+            grp.create_dataset('R', data=R)
+
+    print(f'Saved rotation matrix test data to {path}')
+    return None
+
+
 def save_test_map(map_path, data_path):
     import os
     import h5py
@@ -47,6 +118,7 @@ def save_test_map(map_path, data_path):
         f.create_dataset('z_edges_stars', data=z_edges_stars)
     print('Finished')
     return None
+
 
 def save_gbl_data(test_data_dir):
     from uci_tools import config

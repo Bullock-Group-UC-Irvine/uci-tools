@@ -1,4 +1,4 @@
-name: Python Package using Conda
+name: CI
 
 on: [push]
 
@@ -35,7 +35,7 @@ jobs:
         pip install .
     - name: Test with pytest
       env:
-        MYPACKAGE_CONFIG: .github/config_ci.ini
+        UCI_TOOLS_CONFIG: .github/config_ci.ini
       run: |
         conda install pytest
         pytest

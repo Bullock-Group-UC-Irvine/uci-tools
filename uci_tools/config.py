@@ -124,7 +124,7 @@ def load_config():
     '''
     # If CI set the path to the config_ci.ini, the following will be something
     # other than `False`.
-    config_path = os.environ.get('MYPACKAGE_CONFIG')
+    config_path = os.environ.get('UCI_TOOLS_CONFIG')
     if config_path:
         # In that case, go ahead and get the full path the .ini
         config_path = os.path.expanduser(config_path)

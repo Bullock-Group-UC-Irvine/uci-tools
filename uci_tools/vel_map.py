@@ -41,6 +41,7 @@ def get_m12_path_olti(sim_name, host_idx, snap):
     )
     return path
 
+
 def load_m12_data_olti(sim_path, snap, xmax=None, zmax=None):
     '''
     Load Olti's data for use with `uci_tools.vel_map.plot`. You can also
@@ -217,6 +218,7 @@ def load_m12_data_olti(sim_path, snap, xmax=None, zmax=None):
     
     return pos_star, vel_star, mass_star, pos_gas, vel_gas, mass_gas
 
+
 def calc_vmap(coords, vs, ms, horiz_axis, vert_axis, res, min_cden):
     '''
     Calculate the velocity map for the particles that the user provides.
@@ -391,6 +393,7 @@ def calc_vmap(coords, vs, ms, horiz_axis, vert_axis, res, min_cden):
     vmap = vmap.T
 
     return vmap, x_edges, z_edges
+
 
 def plot(
         pos_star,
@@ -726,168 +729,343 @@ def plot(
         quadmesh_star,
     )
 
-def firebox_vmap(gal_id, res, min_cden=14.):
+
+def firebox_vmap(gal_id, res, min_cden=14., queue=None):
     '''
-    Create a velocity map for bound gas in a given FIREBox galaxy with the same
-    field of view as Courtney's image of that galaxy. If the FIREBox data file
-    doesn't exist in firebox_data_dir/objects_1200 or if the galaxy has no
-    bound gas particles, the function returns None. Note that while
-    UCITools.firebox_io.get_avg_sfrs (incidentally in the Julia portion of this
-    repo), may
-    successfully find bound star particles for a given galaxy, firebox_vmap
-    may fail to find
-    bound gas particles, or vice versa.
+    Create bound-gas velocity maps for all 11 projections of a FIREBox
+    galaxy: the 3 standard axis-aligned projections (xy, yz, zx) plus
+    the 8 octant body-diagonal projections (ppp, ppm, ..., mmm).
+
+    Reads particle data from firebox_data_dir/objects_1200_original.
+    The FOV for each map matches the FOV in Courtney's mock image for
+    that galaxy. Returns None if the particle file does not exist or
+    if the galaxy has no bound gas particles.
+
+    All 11 projection groups are written to a single output file in
+    project_data_dir/vmaps_res{res}_min_cden{min_cden}/, so
+    image_loader.jl can read standard and octant projections without
+    any changes.
+
+    All viewing directions are in simulation coordinates, not
+    per-galaxy disc-aligned coordinates. The octant directions (ppp,
+    ppm, ..., mmm) align with the body diagonals of the simulation
+    coordinate cube.
 
     Parameters
     ----------
     gal_id: int
-        FIREBox galaxy unique ID
+        FIREBox galaxy unique ID.
     res: int
-        The number of pixels along each axis the velocity map should have
+        Number of pixels along each axis of the velocity map.
     min_cden: float, default 14.
-        The minimum column density in M_sun / pc^2 of particles for a pixel
-        in the velocity map to be given a numerical value. Otherwise the pixel
-        is np.nan.
+        Minimum column density in M_sun / pc^2 for a pixel to receive
+        a numerical value; pixels below this threshold are np.nan.
+    queue: multiprocessing.Queue or None, default None
+        When provided, the function sends progress messages of the form
+        ('load', gal_id, None), ('proj', gal_id, n), ('done', gal_id,
+        None), ('skip', gal_id, reason), and ('error', gal_id, msg).
+        save_all_firebox_vmaps uses this for its progress display.
 
     Returns
     -------
-    d: Dict or None
-        Velocity map dictionary. If the FIREBox data file
-        doesn't exist in firebox_data_dir/objects_1200 or if the galaxy has no
-        bound particles, the function returns None.
-
-        Key-value pairs are
+    d: dict or None
+        Returns None when the particle file is missing or no bound gas
+        particles exist. Otherwise, keys are projection names (e.g.
+        'projection_xy', 'projection_ppp'). Each value is a dict with
+        the following keys:
 
         'vmap': np.ndarray, shape (res, res)
-            The velocity map data for analysis or for use with 
-            `matplotlib.axes.Axis.pcolormesh`. Horizontal data is along the
-            1 axis.
-            Vertical data is along the 0 axis. The user can directly input this
-            into
-            `pcolormesh`.
-        'horiz_edges': np.ndarray, shape (res,)
-            The locations of the edges of the velocity map pixels in
-            kpc along
-            the
-            horizontal axis 
-        'vert_edges': np.ndarray, shape (res,)
-            The locations of the edges of the velocity map
-            pixels in kpc along
-            the
-            vertical axis.
-    z_edges, np.ndarray, shape (res,)
+            Mass-weighted mean line-of-sight velocity in km/s. Pixels
+            whose column density falls below min_cden are np.nan.
+        'horiz_edges': np.ndarray, shape (res+1,)
+            Bin edges along the horizontal axis in physical kpc.
+        'vert_edges': np.ndarray, shape (res+1,)
+            Bin edges along the vertical axis in physical kpc.
     '''
     from . import config
     from . import firebox_io
+    from . import rotate_galaxy
     import os
     import h5py
     import numpy as np
 
-    id_str = str(gal_id)
-    
-    super_dir = config.config[f'{__package__}_paths']['firebox_data_dir']
+    firebox_dir = config.config[f'{__package__}_paths']['firebox_data_dir']
     output_dir = os.path.join(
         config.config[f'{__package__}_paths']['project_data_dir'],
-        'vmaps_res{0:0.0f}_min_cden{1:0.1e}'.format(res, min_cden)
+        'vmaps_res{0:0.0f}_min_cden{1:0.1e}'.format(res, min_cden),
     )
-
-    path = os.path.join(
-        super_dir,
-        'objects_1200',
-        f"particles_within_Rvir_object_{id_str}.hdf5"
+    obj_path = os.path.join(
+        firebox_dir,
+        'objects_1200_original',
+        f'particles_within_Rvir_object_{gal_id}.hdf5',
     )
     output_path = os.path.join(
         output_dir,
-        f'object_{gal_id}_vmap.hdf5'
+        f'object_{gal_id}_vmap.hdf5',
     )
 
-    orientation_d = {
-        'projection_xy': {'h': 0, 'v': 1},
-        'projection_yz': {'h': 1, 'v': 2},
-        'projection_zx': {'h': 2, 'v': 0}
-    }
-
-    d = {}
-    if os.path.exists(path):
-        with h5py.File(path, 'r') as f:
-            for orientation, axes_d in orientation_d.items():
-                # Get data for gas inside the fov of Courtney's images.
-                coords, vs, ms, ids, fov = firebox_io.load_particle(
-                    'gas',
-                    f,
-                    gal_id,
-                    axes_d['h'],
-                    axes_d['v'],
-                    only_bound=True
-                )
-                if len(coords) == 0:
-                    # If there are no bound particles, end.
-                    return None 
-                if not os.path.exists(output_dir):
-                    os.makedirs(output_dir)
-                with h5py.File(output_path, 'a') as out_f:
-                    out_f.attrs['fov'] = fov
-                    out_f.attrs['min_cden'] = min_cden
-                    out_f.attrs['res'] = res
-
-                    axes_d = orientation_d[orientation]
-                    vmap, horiz_edges, vert_edges = calc_vmap(
-                        coords,
-                        vs,
-                        ms,
-                        axes_d['h'],
-                        axes_d['v'],
-                        res,
-                        min_cden
-                    )
-
-                    d[orientation] = {}
-                    d[orientation]['vmap'] = vmap
-                    d[orientation]['horiz_edges'] = horiz_edges
-                    d[orientation]['vert_edges'] = vert_edges
-
-                    grp = out_f.create_group(orientation)
-                    grp.create_dataset('vmap', data=vmap)
-                    grp.create_dataset('horiz_edges', data=horiz_edges)
-                    grp.create_dataset('vert_edges', data=vert_edges)
-    else:
+    if not os.path.exists(obj_path):
+        if queue is not None:
+            queue.put(('skip', gal_id, 'file not found'))
         return None
+
+    coords, vs, ms, _ = firebox_io.load_particles('gas', obj_path)
+    if len(coords) == 0:
+        if queue is not None:
+            queue.put(('skip', gal_id, 'no bound gas'))
+        return None
+
+    if queue is not None:
+        queue.put(('load', gal_id, None))
+
+    fov = firebox_io.get_fov(gal_id)
+
+    # Standard projections: (horiz_axis, vert_axis) index pairs.
+    standard = {
+        'projection_xy': (0, 1),
+        'projection_yz': (1, 2),
+        'projection_zx': (2, 0),
+    }
+    z_hat = np.array([0., 0., 1.])
+
+    os.makedirs(output_dir, exist_ok=True)
+    proj_i = 0
+    d = {}
+    try:
+        with h5py.File(output_path, 'w') as out_f:
+            out_f.attrs['fov']      = fov
+            out_f.attrs['min_cden'] = min_cden
+            out_f.attrs['res']      = res
+
+            for proj_name, (h_ax, v_ax) in standard.items():
+                in_fov = (
+                    np.linalg.norm(coords[:, [h_ax, v_ax]], axis=1)
+                    <= fov / 2.
+                )
+                c, v, m = coords[in_fov], vs[in_fov], ms[in_fov]
+                if len(c) == 0:
+                    continue
+                vmap, horiz_edges, vert_edges = calc_vmap(
+                    c, v, m, h_ax, v_ax, res, min_cden,
+                )
+                d[proj_name] = {
+                    'vmap': vmap,
+                    'horiz_edges': horiz_edges,
+                    'vert_edges': vert_edges,
+                }
+                grp = out_f.create_group(proj_name)
+                grp.create_dataset('vmap', data=vmap)
+                grp.create_dataset('horiz_edges', data=horiz_edges)
+                grp.create_dataset('vert_edges', data=vert_edges)
+                proj_i += 1
+                if queue is not None:
+                    queue.put(('proj', gal_id, proj_i))
+
+            for label, n in rotate_galaxy.OCTANT_DIRECTIONS.items():
+                proj_name = f'projection_{label}'
+                R = rotate_galaxy.rotation_matrix(n, z_hat)
+                coords_rot = coords @ R.T
+                vs_rot     = vs    @ R.T
+                in_fov = (
+                    np.linalg.norm(coords_rot[:, :2], axis=1)
+                    <= fov / 2.
+                )
+                c, v, m = (
+                    coords_rot[in_fov], vs_rot[in_fov], ms[in_fov],
+                )
+                if len(c) == 0:
+                    continue
+                vmap, horiz_edges, vert_edges = calc_vmap(
+                    c, v, m, 0, 1, res, min_cden,
+                )
+                d[proj_name] = {
+                    'vmap': vmap,
+                    'horiz_edges': horiz_edges,
+                    'vert_edges': vert_edges,
+                }
+                grp = out_f.create_group(proj_name)
+                grp.create_dataset('vmap', data=vmap)
+                grp.create_dataset('horiz_edges', data=horiz_edges)
+                grp.create_dataset('vert_edges', data=vert_edges)
+                proj_i += 1
+                if queue is not None:
+                    queue.put(('proj', gal_id, proj_i))
+
+    except Exception as exc:
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        if queue is not None:
+            queue.put(('error', gal_id, str(exc)))
+        return None
+
+    if queue is not None:
+        queue.put(('done', gal_id, None))
     return d
+
+
+def _vmap_worker(args):
+    '''Unpack arguments for firebox_vmap for use with Pool.starmap.'''
+    return firebox_vmap(*args)
+
 
 def save_all_firebox_vmaps(res, min_cden=14.):
     '''
-    Save bound-gas velocity maps for all FIREBox galaxies whose files exist in 
-    firebox_data_dir/objects_1200. The field of
-    view for each map corresponds to the field of view in
-    Courtney's mock image for the corresponding galaxy. The code saves the maps
-    in
+    Save bound-gas velocity maps for all FIREBox galaxies whose
+    particle files exist in firebox_data_dir/objects_1200_original.
+    Each output file contains 11 projection groups: projection_xy,
+    projection_yz, projection_zx, and one group per octant direction.
+    The code saves files to
     project_data_dir/vmaps_res{res}_min_cden{min_cden}.
 
     Parameters
     ----------
     res: int
-        The number of pixels along each axis the velocity map should have
+        Number of pixels along each axis of the velocity map.
     min_cden: float, default 14.
-        The minimum column density in M_sun / pc^2 of particles for a pixel
-        in the velocity map to be given a numerical value. Otherwise the pixel
-        is np.nan.
+        Minimum column density in M_sun / pc^2 for a pixel to receive
+        a numerical value; pixels below this threshold are np.nan.
 
     Returns
     -------
     None
     '''
-    from . import config
     from . import firebox_io
-    import os
-    import glob
-    import tqdm
+    import multiprocessing
+    import rich.live
+    import rich.progress
+
     df = firebox_io.load_grp_ids()
-    for gal_id in tqdm.tqdm(df.index, desc='Generating velocity maps'):
-        try:
-            firebox_vmap(gal_id, res, min_cden)
-        except KeyError:
-            print(f'object_{gal_id} is missing')
+    gal_ids = list(df.index)
+    n_galaxies = len(gal_ids)
+
+    n_workers = multiprocessing.cpu_count()
+    manager = multiprocessing.Manager()
+    queue = manager.Queue()
+
+    work_args = [
+        (gal_id, res, min_cden, queue)
+        for gal_id in gal_ids
+    ]
+
+    progress = rich.progress.Progress(
+        rich.progress.TextColumn(
+            '{task.description}', style='bold',
+        ),
+        rich.progress.BarColumn(bar_width=30),
+        rich.progress.MofNCompleteColumn(),
+        rich.progress.TimeElapsedColumn(),
+    )
+
+    overall_task = progress.add_task(
+        f'[cyan]Overall ({n_workers} workers)',
+        total=n_galaxies,
+    )
+
+    # Maps gal_id -> rich task_id for active galaxy bars.
+    active_tasks = {}
+
+    n_done = 0
+    n_skip = 0
+    n_finished = 0
+
+    with (
+        multiprocessing.Pool(n_workers) as pool,
+        rich.live.Live(progress, refresh_per_second=12),
+    ):
+        async_results = pool.starmap_async(
+            firebox_vmap, work_args,
+        )
+
+        while not async_results.ready() or not queue.empty():
+            try:
+                msg = queue.get(timeout=0.1)
+            except Exception:
+                continue
+
+            kind, gal_id, payload = msg
+
+            if kind == 'load':
+                tid = progress.add_task(
+                    f'  galaxy {gal_id}',
+                    total=11,
+                )
+                active_tasks[gal_id] = tid
+
+            elif kind == 'proj':
+                tid = active_tasks.get(gal_id)
+                if tid is not None:
+                    progress.update(
+                        tid, completed=payload,
+                    )
+
+            elif kind == 'done':
+                tid = active_tasks.pop(gal_id, None)
+                if tid is not None:
+                    progress.update(
+                        tid,
+                        completed=11,
+                        description=(
+                            f'  galaxy {gal_id} [green]✓'
+                        ),
+                    )
+                    progress.remove_task(tid)
+                n_done += 1
+                n_finished += 1
+                progress.update(
+                    overall_task, completed=n_finished,
+                )
+
+            elif kind == 'skip':
+                n_skip += 1
+                n_finished += 1
+                progress.update(
+                    overall_task, completed=n_finished,
+                )
+
+            elif kind == 'error':
+                tid = active_tasks.pop(gal_id, None)
+                if tid is not None:
+                    progress.update(
+                        tid,
+                        description=(
+                            f'  galaxy {gal_id}'
+                            f' [red]✗ {payload}'
+                        ),
+                    )
+                    progress.remove_task(tid)
+                n_skip += 1
+                n_finished += 1
+                progress.update(
+                    overall_task, completed=n_finished,
+                )
+
+        # Drain any remaining messages after the pool finishes.
+        while not queue.empty():
+            try:
+                msg = queue.get_nowait()
+                kind, gal_id, payload = msg
+                if kind in ('done', 'skip', 'error'):
+                    n_finished += 1
+                    if kind == 'done':
+                        n_done += 1
+                    else:
+                        n_skip += 1
+                    progress.update(
+                        overall_task,
+                        completed=n_finished,
+                    )
+                    tid = active_tasks.pop(gal_id, None)
+                    if tid is not None:
+                        progress.remove_task(tid)
+            except Exception:
+                break
+
+    print(
+        f'\nDone. {n_done} galaxies processed,'
+        f' {n_skip} skipped.',
+    )
     return None
+
 
 def load_firebox_vmap(gal_id, res, min_cden):
     '''
@@ -960,6 +1138,7 @@ def load_firebox_vmap(gal_id, res, min_cden):
                     label=r'Gas LOS Velocity [kms$^{-1}]$'
                 )
     return None
+
 
 def imshow_firebox_vmap(gal_id, res, min_cden):
     '''
