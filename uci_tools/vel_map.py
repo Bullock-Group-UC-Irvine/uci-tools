@@ -809,29 +809,34 @@ def firebox_vmap(gal_id, res, min_cden=14., queue=None):
             queue.put(('skip', gal_id, 'file not found'))
         return None
 
-    coords, vs, ms, _ = firebox_io.load_particles('gas', obj_path)
-    if len(coords) == 0:
-        if queue is not None:
-            queue.put(('skip', gal_id, 'no bound gas'))
-        return None
-
-    if queue is not None:
-        queue.put(('load', gal_id, None))
-
-    fov = firebox_io.get_fov(gal_id)
-
-    # Standard projections: (horiz_axis, vert_axis) index pairs.
-    standard = {
-        'projection_xy': (0, 1),
-        'projection_yz': (1, 2),
-        'projection_zx': (2, 0),
-    }
-    z_hat = np.array([0., 0., 1.])
-
-    os.makedirs(output_dir, exist_ok=True)
     proj_i = 0
     d = {}
     try:
+        coords, vs, ms, _ = firebox_io.load_particles('gas', obj_path)
+        if len(coords) == 0:
+            if queue is not None:
+                queue.put(('skip', gal_id, 'no bound gas'))
+            return None
+
+        if queue is not None:
+            queue.put(('load', gal_id, None))
+
+        try:
+            fov = firebox_io.get_fov(gal_id)
+        except KeyError:
+            if queue is not None:
+                queue.put(('skip', gal_id, 'no FOV data'))
+            return None
+
+        # Standard projections: (horiz_axis, vert_axis) index pairs.
+        standard = {
+            'projection_xy': (0, 1),
+            'projection_yz': (1, 2),
+            'projection_zx': (2, 0),
+        }
+        z_hat = np.array([0., 0., 1.])
+
+        os.makedirs(output_dir, exist_ok=True)
         with h5py.File(output_path, 'w') as out_f:
             out_f.attrs['fov']      = fov
             out_f.attrs['min_cden'] = min_cden
@@ -965,8 +970,67 @@ def save_all_firebox_vmaps(res, min_cden=14.):
     active_tasks = {}
 
     n_done = 0
-    n_skip = 0
     n_finished = 0
+    # Maps skip/error reason -> list of gal_ids.
+    skipped = {}
+    errors  = {}
+
+    def _handle_msg(kind, gal_id, payload):
+        nonlocal n_done, n_finished
+        if kind == 'load':
+            tid = progress.add_task(
+                f'  galaxy {gal_id}',
+                total=11,
+            )
+            active_tasks[gal_id] = tid
+
+        elif kind == 'proj':
+            tid = active_tasks.get(gal_id)
+            if tid is not None:
+                progress.update(
+                    tid, completed=payload,
+                )
+
+        elif kind == 'done':
+            tid = active_tasks.pop(gal_id, None)
+            if tid is not None:
+                progress.update(
+                    tid,
+                    completed=11,
+                    description=(
+                        f'  galaxy {gal_id} [green]✓'
+                    ),
+                )
+                progress.remove_task(tid)
+            n_done += 1
+            n_finished += 1
+            progress.update(
+                overall_task, completed=n_finished,
+            )
+
+        elif kind == 'skip':
+            skipped.setdefault(payload, []).append(gal_id)
+            n_finished += 1
+            progress.update(
+                overall_task, completed=n_finished,
+            )
+
+        elif kind == 'error':
+            tid = active_tasks.pop(gal_id, None)
+            if tid is not None:
+                progress.update(
+                    tid,
+                    description=(
+                        f'  galaxy {gal_id}'
+                        f' [red]✗ {payload}'
+                    ),
+                )
+                progress.remove_task(tid)
+            errors.setdefault(payload, []).append(gal_id)
+            n_finished += 1
+            progress.update(
+                overall_task, completed=n_finished,
+            )
 
     with (
         multiprocessing.Pool(n_workers) as pool,
@@ -981,89 +1045,27 @@ def save_all_firebox_vmaps(res, min_cden=14.):
                 msg = queue.get(timeout=0.1)
             except Exception:
                 continue
-
-            kind, gal_id, payload = msg
-
-            if kind == 'load':
-                tid = progress.add_task(
-                    f'  galaxy {gal_id}',
-                    total=11,
-                )
-                active_tasks[gal_id] = tid
-
-            elif kind == 'proj':
-                tid = active_tasks.get(gal_id)
-                if tid is not None:
-                    progress.update(
-                        tid, completed=payload,
-                    )
-
-            elif kind == 'done':
-                tid = active_tasks.pop(gal_id, None)
-                if tid is not None:
-                    progress.update(
-                        tid,
-                        completed=11,
-                        description=(
-                            f'  galaxy {gal_id} [green]✓'
-                        ),
-                    )
-                    progress.remove_task(tid)
-                n_done += 1
-                n_finished += 1
-                progress.update(
-                    overall_task, completed=n_finished,
-                )
-
-            elif kind == 'skip':
-                n_skip += 1
-                n_finished += 1
-                progress.update(
-                    overall_task, completed=n_finished,
-                )
-
-            elif kind == 'error':
-                tid = active_tasks.pop(gal_id, None)
-                if tid is not None:
-                    progress.update(
-                        tid,
-                        description=(
-                            f'  galaxy {gal_id}'
-                            f' [red]✗ {payload}'
-                        ),
-                    )
-                    progress.remove_task(tid)
-                n_skip += 1
-                n_finished += 1
-                progress.update(
-                    overall_task, completed=n_finished,
-                )
+            _handle_msg(*msg)
 
         # Drain any remaining messages after the pool finishes.
         while not queue.empty():
             try:
-                msg = queue.get_nowait()
-                kind, gal_id, payload = msg
-                if kind in ('done', 'skip', 'error'):
-                    n_finished += 1
-                    if kind == 'done':
-                        n_done += 1
-                    else:
-                        n_skip += 1
-                    progress.update(
-                        overall_task,
-                        completed=n_finished,
-                    )
-                    tid = active_tasks.pop(gal_id, None)
-                    if tid is not None:
-                        progress.remove_task(tid)
+                _handle_msg(*queue.get_nowait())
             except Exception:
                 break
 
-    print(
-        f'\nDone. {n_done} galaxies processed,'
-        f' {n_skip} skipped.',
-    )
+    n_skip = sum(len(v) for v in skipped.values())
+    n_err  = sum(len(v) for v in errors.values())
+    print(f'\nDone. {n_done} processed, {n_skip} skipped,'
+          f' {n_err} errors.')
+    if skipped:
+        print('\nSkipped:')
+        for reason, ids in skipped.items():
+            print(f'  {reason} ({len(ids)}): {ids}')
+    if errors:
+        print('\nErrors:')
+        for reason, ids in errors.items():
+            print(f'  {reason} ({len(ids)}): {ids}')
     return None
 
 
