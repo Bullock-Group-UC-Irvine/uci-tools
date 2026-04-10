@@ -13,9 +13,14 @@ import ..UCIToolsConfig
 
 ENV["GKSwstype"] = "100"
 
-conf = UCIToolsConfig.read_config()
-super_direc = conf["uci_tools_paths"]["firebox_data_dir"]
-output_dir = conf["uci_tools_paths"]["project_data_dir"]
+super_direc = ""
+output_dir = ""
+
+function __init__()
+    conf = UCIToolsConfig.read_config()
+    global super_direc = conf["uci_tools_paths"]["firebox_data_dir"]
+    global output_dir  = conf["uci_tools_paths"]["project_data_dir"]
+end
 
 function get_grp_id(gal_id)
     fname = super_direc * 

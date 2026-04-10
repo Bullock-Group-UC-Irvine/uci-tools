@@ -5,11 +5,30 @@ import Pkg
 
 export read_config
 
+# Walk up the directory tree from the active project until finding a
+# Project.toml that has a `name` field, then return ~/config_<name>.ini.
+# This handles sub-projects (e.g. scripts/) that intentionally omit
+# `name` but still want to inherit the parent project's config.
+function _config_path()
+    dir = dirname(Pkg.API.project().path)
+    while true
+        toml = joinpath(dir, "Project.toml")
+        if isfile(toml)
+            proj = Pkg.TOML.parsefile(toml)
+            if haskey(proj, "name")
+                return expanduser("~/config_" * proj["name"] * ".ini")
+            end
+        end
+        parent = dirname(dir)
+        parent == dir && error(
+            "No named Project.toml found in any parent directory"
+        )
+        dir = parent
+    end
+end
+
 function read_config()
-    toml_path = Pkg.API.project().path
-    proj = Pkg.TOML.parsefile(toml_path)
-    config_fname = "config_" * proj["name"] * ".ini"
-    config_path = expanduser(joinpath("~/", config_fname))
+    config_path = _config_path()
 
     # Parse the file
     conf = ConfParser.ConfParse(config_path)
