@@ -16,6 +16,7 @@ ENV["GKSwstype"] = "100"
 
 conf = UCIToolsConfig.read_config()
 firebox_dir = conf["uci_tools_paths"]["firebox_data_dir"]
+firebox_snap = conf["uci_tools_paths"]["firebox_snap"]
 output_dir = conf["uci_tools_paths"]["project_data_dir"]
 
 function get_sfrs(
@@ -47,10 +48,11 @@ function get_sfrs(
                 "\nObject " * id_str * " has group ID " * string(grp_id) * "."
             )
         end
-        fname = firebox_dir *
-            "objects_1200/particles_within_Rvir_object_" * 
-            id_str * 
-            ".hdf5"
+        fname = joinpath(
+            firebox_dir,
+            firebox_snap,
+            "particles_within_Rvir_object_" * id_str * ".hdf5"
+        )
         if isfile(fname)
             sfrs, gas_masses, Mstar, snap_time, gas_ids = HDF5.h5open(
                         fname, 
@@ -191,7 +193,7 @@ function get_avg_sfrs(ids, grp_ids, age; only_bound=false)
         id_str = string(gal_id)
         path = joinpath(
             firebox_dir,
-            "objects_1200",
+            firebox_snap,
             "particles_within_Rvir_object_" * id_str * ".hdf5"
         )
         if isfile(path)
@@ -288,7 +290,7 @@ function get_gas_mass_by_temp(id)
     uci = PyCall.pyimport("uci_tools")
 
     fname = "particles_within_Rvir_object_" * string(id) * ".hdf5"
-    path = joinpath(firebox_dir, "objects_1200", fname)
+    path = joinpath(firebox_dir, firebox_snap, fname)
     (
         gas_masses,
         he_fracs,

@@ -736,7 +736,8 @@ def firebox_vmap(gal_id, res, min_cden=14., queue=None):
     galaxy: the 3 standard axis-aligned projections (xy, yz, zx) plus
     the 8 octant body-diagonal projections (ppp, ppm, ..., mmm).
 
-    Reads particle data from firebox_data_dir/objects_1200_original.
+    Reads particle data from firebox_data_dir/firebox_snap, with both
+    paths set in the uci_tools_paths section of the config.
     The FOV for each map matches the FOV in Courtney's mock image for
     that galaxy. Returns None if the particle file does not exist or
     if the galaxy has no bound gas particles.
@@ -790,13 +791,14 @@ def firebox_vmap(gal_id, res, min_cden=14., queue=None):
     import numpy as np
 
     firebox_dir = config.config[f'{__package__}_paths']['firebox_data_dir']
+    firebox_snap = config.config[f'{__package__}_paths']['firebox_snap']
     output_dir = os.path.join(
         config.config[f'{__package__}_paths']['project_data_dir'],
         'vmaps_res{0:0.0f}_min_cden{1:0.1e}'.format(res, min_cden),
     )
     obj_path = os.path.join(
         firebox_dir,
-        'objects_1200_original',
+        firebox_snap,
         f'particles_within_Rvir_object_{gal_id}.hdf5',
     )
     output_path = os.path.join(
@@ -916,7 +918,8 @@ def _vmap_worker(args):
 def save_all_firebox_vmaps(res, min_cden=14.):
     '''
     Save bound-gas velocity maps for all FIREBox galaxies whose
-    particle files exist in firebox_data_dir/objects_1200_original.
+    particle files exist in firebox_data_dir/firebox_snap (both set in
+    the uci_tools_paths section of the config).
     Each output file contains 11 projection groups: projection_xy,
     projection_yz, projection_zx, and one group per octant direction.
     The code saves files to
@@ -1036,6 +1039,12 @@ def save_all_firebox_vmaps(res, min_cden=14.):
         multiprocessing.Pool(n_workers) as pool,
         rich.live.Live(progress, refresh_per_second=12),
     ):
+        # pool.starmap_async is from Python's multiprocessing package.
+        # Like the * operator, it unpacks each tuple in work_args and
+        # calls firebox_vmap(*args) for each one across the worker pool.
+        # The _async suffix means it returns immediately rather than
+        # blocking, so the while loop below can drain the progress queue
+        # while workers run.
         async_results = pool.starmap_async(
             firebox_vmap, work_args,
         )
@@ -1200,5 +1209,82 @@ def imshow_firebox_vmap(gal_id, res, min_cden):
                     '{0} [kpc]'.format(axes_d[orientation_d[name]['v']])
                 )
                 axs[i].set_aspect('equal', adjustable='box')
+    plt.show()
+    return None
+
+
+def show_firebox_vmap_live(gal_id, res, min_cden=14.):
+    '''
+    Compute and display the bound-gas velocity map for a FIREBox galaxy
+    without reading from or writing to a file.
+
+    Parameters
+    ----------
+    gal_id: int
+        FIREBox galaxy unique ID.
+    res: int
+        Number of pixels along each axis of the velocity map.
+    min_cden: float, default 14.
+        Minimum column density in M_sun / pc^2 for a pixel to receive a
+        numerical value; pixels below this threshold are np.nan.
+
+    Returns
+    -------
+    None
+    '''
+    import numpy as np
+    from matplotlib import pyplot as plt
+
+    d = firebox_vmap(gal_id, res, min_cden)
+    if d is None:
+        print(f'No data for galaxy {gal_id}.')
+        return None
+
+    orientation_d = {
+        'projection_xy': {'h': 0, 'v': 1},
+        'projection_yz': {'h': 1, 'v': 2},
+        'projection_zx': {'h': 2, 'v': 0},
+    }
+    axes_d = {0: '$x$', 1: '$y$', 2: '$z$'}
+
+    projections = list(d.keys())
+    n = len(projections)
+    fig, axs = plt.subplots(4, 3, figsize=(12, 16))
+    axs = axs.ravel()
+    for ax in axs[n:]:
+        ax.set_visible(False)
+
+    for i, name in enumerate(projections):
+        vmap = d[name]['vmap']
+        horiz_edges = d[name]['horiz_edges']
+        vert_edges = d[name]['vert_edges']
+        vmax = np.nanmax(np.abs(vmap))
+        quadmesh = axs[i].pcolormesh(
+            horiz_edges,
+            vert_edges,
+            vmap,
+            cmap=plt.cm.seismic_r,
+            vmin=-vmax,
+            vmax=vmax,
+        )
+        if name in orientation_d:
+            axs[i].set_xlabel(
+                '{0} [kpc]'.format(axes_d[orientation_d[name]['h']])
+            )
+            axs[i].set_ylabel(
+                '{0} [kpc]'.format(axes_d[orientation_d[name]['v']])
+            )
+        else:
+            axs[i].set_xlabel('kpc')
+            axs[i].set_ylabel('kpc')
+        label = name.replace('projection_', '')
+        axs[i].set_title(label)
+        axs[i].set_aspect('equal', adjustable='box')
+        fig.colorbar(
+            quadmesh,
+            ax=axs[i],
+            label=r'Gas LOS Velocity [km s$^{-1}$]',
+        )
+    plt.tight_layout()
     plt.show()
     return None

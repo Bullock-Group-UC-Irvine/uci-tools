@@ -14,11 +14,13 @@ import ..UCIToolsConfig
 ENV["GKSwstype"] = "100"
 
 super_direc = ""
+firebox_snap = ""
 output_dir = ""
 
 function __init__()
     conf = UCIToolsConfig.read_config()
     global super_direc = conf["uci_tools_paths"]["firebox_data_dir"]
+    global firebox_snap = conf["uci_tools_paths"]["firebox_snap"]
     global output_dir  = conf["uci_tools_paths"]["project_data_dir"]
 end
 
@@ -86,7 +88,7 @@ function get_both(; only_files=true)
                 ".hdf5"
             for id in gal_ids
         ]
-        direc = joinpath(super_direc, "objects_1200")
+        direc = joinpath(super_direc, firebox_snap)
         println("Getting list of existing files.")
         #existing_files = filter(
         #    f -> isfile(joinpath(direc, f)) && endswith(f, ".hdf5"), 
@@ -106,7 +108,7 @@ end
 function get_bound_particles(id)
     path = joinpath(
         super_direc,
-        "objects_1200",
+        firebox_snap,
         "bound_particle_filters_object_" * string(id) * ".hdf5"
     )
     particle_ids = HDF5.h5open(path, "r") do file
@@ -131,10 +133,11 @@ function summarize_gals(;save=false)
                 enumerate(zip(ids, grp_ids))
             )
         id_str = string(gal_id)
-        fname = super_direc *
-            "objects_1200/particles_within_Rvir_object_" * 
-            id_str * 
-            ".hdf5"
+        fname = joinpath(
+            super_direc,
+            firebox_snap,
+            "particles_within_Rvir_object_" * id_str * ".hdf5"
+        )
         if isfile(fname)
             h5open(
                         fname, 

@@ -49,6 +49,7 @@ def save_var_latex(key, value, fname='data.txt'):
 
     return None
 
+
 def save_prediction(string, y, dy, fname='data.txt'):
     '''
     Save a prediction and its uncertainty to `fname` in the `paper_dir` defined
@@ -93,6 +94,7 @@ def save_prediction(string, y, dy, fname='data.txt'):
     else:
         raise ValueError('Margin of error has a maximum of two elements.')
     return None
+
 
 def get_data(filename, num_of_file, key1, key2):
     '''
@@ -156,6 +158,7 @@ def get_data(filename, num_of_file, key1, key2):
                         result = np.vstack( (result,f[key1][key2][:]) )
         return result
 
+
 def read_snapshot_simple( filepath, particle_type='PartType0' ):
     import h5py
     import pandas as pd
@@ -175,6 +178,7 @@ def read_snapshot_simple( filepath, particle_type='PartType0' ):
             
     return p
 
+
 def fe_over_h_ratios(mfrac,he_frac,fe_frac):
     import numpy as np
 
@@ -189,6 +193,7 @@ def fe_over_h_ratios(mfrac,he_frac,fe_frac):
     ab_fe_h = np.asarray(np.log10(fe_h_num/sun_fe_h_frac))
     return ab_fe_h
 
+
 def sft_to_ages(sft):
     from astropy.cosmology import Planck13 
     import numpy as np
@@ -196,6 +201,7 @@ def sft_to_ages(sft):
     z = (1/sft)-1
     ages = np.array((Planck13.lookback_time(z)))
     return ages
+
 
 def calc_cyl_vels(v_vecs_rot, coords_rot):
     '''
@@ -286,6 +292,7 @@ def calc_cyl_vels(v_vecs_rot, coords_rot):
 
     return d
 
+
 def calc_temps(he_fracs, e_abundances, energies):
     '''
     Calculates temperatures of particles in Kelvin
@@ -317,6 +324,7 @@ def calc_temps(he_fracs, e_abundances, energies):
     Ts = mean_molecular_weights.si * (gamma-1.) * energies*u.km**2./u.s**2. \
          / c.k_B
     return Ts.to(u.K)
+
 
 def get_halo_info(halodirec, suffix, typ, host_key, mass_class):
     '''
@@ -385,6 +393,7 @@ def get_halo_info(halodirec, suffix, typ, host_key, mass_class):
         raise ValueError('Cannot yet handle log M < 10')
     return p, r, v, mvir
 
+
 def get_downsample_groups(path, cutoff):
     '''
     Determine features that should be subsampled together as a group.
@@ -442,6 +451,7 @@ def get_downsample_groups(path, cutoff):
     IPython.display.display(groups)
 
     return groups 
+
 
 def downsample_data(path, output_path, groups, reduction=1.e-5):
     import numpy as np
@@ -518,3 +528,86 @@ def downsample_data(path, output_path, groups, reduction=1.e-5):
     ))
 
     return None
+
+
+def standardize(X, return_distrib=False, means=None, stds=None):
+    '''
+    Standardize a dataset along axis 1 e.g. the color channels of a NCHW 
+    (number-channel-height-width) dataset
+
+    Parameters
+    ----------
+    X: np.ndarray, shape (N_obs, N_chan, h, w)
+        Dataset to standardize
+    return_distrib: bool, default False
+        If True, return the means and standard deviations of each channel so
+        the user can apply them later without recalculating
+    means: np.ndarray of floats, shape (N_chan,), default None
+        The means to apply to each channel when standardizing
+    stds: np.ndarray of floats, shape (N_chan,), default None
+        The standard deviations to appy to each channel when standardizing
+
+    Returns
+    -------
+    X: np.ndarray, shape (N_obs, N_chan, h, w)
+        The standardized dataset.
+    means: np.ndarray, shape (N_chan,)
+        The calculated mean of each channel. Only returned when
+        return_distrib=True.
+    stds: np.ndarray, shape (N_chan,)
+        The calculated standard deviation of each channel. Only returned
+        when return_distrib=True.
+    '''
+    import numpy as np
+    if means is None:
+        means = np.zeros(X.shape[1])
+    if stds is None:
+        stds = np.zeros(X.shape[1])
+    for i in range(X.shape[1]):
+        std = X[:, i].std()
+        mean = X[:, i].mean()
+        X[:, i] -= mean
+        X[:, i] /= std
+        means[i] = mean
+        stds[i] = std
+    if return_distrib:
+        return X, means, stds
+    else:
+        return X 
+
+
+def std_asinh(X, stretch=1.e-5, return_distrib=False, means=None, stds=None):
+    '''
+    Apply asinh to the dataset with the given stretch and standardize the
+    result along axis 1 e.g. the color channels of a
+    NCHW (number-channel-height-width) dataset
+
+    Parameters
+    ----------
+    X: np.ndarray, shape (N_obs, N_chan, h, w)
+        Dataset to process.
+    stretch: float
+        The value by which to multiply X before applying asinh.
+    return_distrib: bool, default False
+        If True, return the means and standard deviations of each channel so
+        the user can apply them later without recalculating
+    means: np.ndarray of floats, shape (N_chan,), default None
+        The means to apply to each channel when standardizing
+    stds: np.ndarray of floats, shape (N_chan,), default None
+        The standard deviations to appy to each channel when standardizing
+
+    Returns
+    -------
+    X: np.ndarray, shape (N_obs, N_chan, h, w)
+        The standardized dataset.
+    means: np.ndarray, shape (N_chan,)
+        The calculated mean of each channel. Only returned when
+        return_distrib=True.
+    stds: np.ndarray, shape (N_chan,)
+        The calculated standard deviation of each channel. Only returned
+        when return_distrib=True.
+    '''
+
+    import numpy as np
+    X = np.asinh(stretch * X)
+    return standardize(X, return_distrib, means, stds)

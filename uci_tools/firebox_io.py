@@ -55,7 +55,15 @@ def get_gal_path(gal_id):
     return path
 
 
-def show_gal(gal_id):
+def show_gal(gal_id, scaling='std_asinh'):
+    from . import config, tools
+
+    scaling_options = ('std_asinh', 'log')
+    if scaling not in scaling_options:
+        raise ValueError(
+            f"scaling must be one of {scaling_options}, got {scaling!r}"
+        )
+
     path = get_gal_path(gal_id)
 
     with h5py.File(path, 'r') as f:
@@ -63,23 +71,55 @@ def show_gal(gal_id):
         image_yz = np.array(f['projection_yz']['band_g'])
         image_zx = np.array(f['projection_zx']['band_g'])
 
-    fig, axs = plt.subplots(1, 3, figsize=(12, 4))
+    octant_img_dir = config.config.get(
+        f'{__package__}_paths',
+        'octant_img_dir'
+    )
+    octant_path = find_gal_in_direc(gal_id, octant_img_dir)
+    octant_imgs = {}
+    with h5py.File(octant_path, 'r') as f:
+        for proj in f.keys():
+            octant_imgs[proj] = f[proj]['band_g'][:]
+    imgs = [
+        image_xy,
+        image_yz,
+        image_zx,
+        *[octant_imgs[proj] for proj in octant_imgs]
+    ]
+
+    fig, axs = plt.subplots(4, 3, figsize=(12, 12))
+    axs = axs.ravel()
     fig.subplots_adjust(wspace=0.01)
-    for image, ax in zip([image_xy, image_yz, image_zx], axs):
-        ax.imshow(
-            image,
-            cmap='gray', 
-            interpolation='none',
-            norm=mpl.colors.LogNorm(
+    if scaling == 'std_asinh':
+        for i in range(len(imgs)):
+            imgs[i] = tools.std_asinh(
+                imgs[i][np.newaxis, np.newaxis],
+                stretch=1.e-5,
+                means=[0.6394],
+                stds=[1.2695]
+            ).squeeze()
+    for image, ax in zip(imgs, axs):
+        if scaling == 'std_asinh':
+            ax.imshow(
+                image,
+                cmap='gray'
+            )
+        else:
+            ax.imshow(
+                image,
+                cmap='gray',
+                interpolation='none',
+                norm=mpl.colors.LogNorm(
                     vmin=5.e5,
                     vmax=1.e8
                 ),
-            #origin='lower'
-        )
+            )
         ax.set_xticks([])
         ax.set_yticks([])
         ax.set_facecolor('k')
         ax.set_aspect('equal')
+    for ax in axs[len(imgs):]:
+        ax.set_visible(False)
     plt.show()
 
     return None
@@ -205,9 +245,10 @@ def get_bound_particles(gal_id):
     import h5py
 
     super_dir = config.config.get(f'{__package__}_paths', 'firebox_data_dir')
+    firebox_snap = config.config.get(f'{__package__}_paths', 'firebox_snap')
     path = os.path.join(
         super_dir,
-        'objects_1200',
+        firebox_snap,
         f"bound_particle_filters_object_{str(gal_id)}.hdf5"
     )
     with h5py.File(path, 'r') as f:

@@ -85,6 +85,8 @@ def ensure_user_config():
         )
         print(f'firebox_data_dir added to {__package__}_paths')
 
+    ensure_key(config, 'firebox_snap', 'objects_1200_original')
+
     if not config.has_option(f'{__package__}_paths', 'host_2d_shapes'): 
         config.set(
             f'{__package__}_paths',
@@ -100,6 +102,11 @@ def ensure_user_config():
         '/DFS-L/DATA/cosmo/kleinca/data/'
             'DataWithMockImagesWithBadExtinction/'
             'AstroPhot_Sate_Sersic_AllMeasure.csv'
+    )
+    ensure_key(
+        config,
+        'octant_img_dir',
+        '/DFS-L/DATA/cosmo/pstaudt/FIREBox_Images/Images/band_ugr'
     )
 
     with open(config_path, 'w') as f:
