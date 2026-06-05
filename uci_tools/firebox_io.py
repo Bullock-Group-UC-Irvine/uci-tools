@@ -159,7 +159,7 @@ _PARTICLE_INFO = {
 }
 
 
-def load_particles(particle_type, obj_path, only_bound=True):
+def load_particles(particle_type, obj_path, only_bound=False):
     '''
     Load particles of the given type from a FIREBox HDF5 file without
     FOV filtering. The caller applies the FOV filter after any
@@ -174,7 +174,7 @@ def load_particles(particle_type, obj_path, only_bound=True):
         The type of particles to load.
     obj_path: str
         Path to a particles_within_Rvir HDF5 file.
-    only_bound: bool, default True
+    only_bound: bool, default False
         When True, filter to bound particles using the
         bound_particle_filters file in the same directory.
 

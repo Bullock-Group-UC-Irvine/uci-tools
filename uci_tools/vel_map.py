@@ -265,19 +265,18 @@ def calc_vmap(coords, vs, ms, horiz_axis, vert_axis, res, min_cden):
     Returns
     -------
     vmap, np.ndarray, shape (res, res)
-        The velocity map data for analysis or for use with 
-        `matplotlib.axes.Axis.pcolormesh`. Horizontal data is along the 1 axis.
-        Vertical data is along the 0 axis. The user can directly input this
-        into
-        `pcolormesh`.
-    x_edges, np.ndarray, shape (res,)
-        The locations of the edges of the velocity map pixels in kpc along
-        the
-        horizontal axis
-    z_edges, np.ndarray, shape (res,)
-        The locations of the edges of the velocity map pixels in kpc along
-        the
-        vertical axis
+        The velocity map. Horizontal data is along axis 1; vertical data is
+        along axis 0. Row 0 corresponds to the highest vertical coordinate
+        (top of the image), so `imshow` displays the map correctly without
+        specifying `extent` or `origin`. Pass `x_edges` and `z_edges` to
+        `pcolormesh` to get correct axis tick positions.
+    x_edges, np.ndarray, shape (res+1,)
+        Bin edges along the horizontal axis in physical kpc.
+    z_edges, np.ndarray, shape (res+1,)
+        Bin edges along the vertical axis in physical kpc. z_edges[0] is
+        the largest (most positive) vertical coordinate, matching row 0 of
+        `vmap`. Pass to `pcolormesh` so the vertical axis runs
+        bottom-to-top in physical coordinates.
     '''
     import numpy as np
     import matplotlib.pyplot as plt
@@ -730,7 +729,17 @@ def plot(
     )
 
 
-def firebox_vmap(gal_id, res, min_cden=14., queue=None):
+# Cached grp_id table; loaded on first firebox_vmap call, reused after.
+_grp_ids_d = None
+
+
+def firebox_vmap(
+        gal_id,
+        res,
+        min_cden=14.,
+        queue=None,
+        save=False,
+        bound_filter='none'):
     '''
     Create bound-gas velocity maps for all 11 projections of a FIREBox
     galaxy: the 3 standard axis-aligned projections (xy, yz, zx) plus
@@ -743,8 +752,8 @@ def firebox_vmap(gal_id, res, min_cden=14., queue=None):
     if the galaxy has no bound gas particles.
 
     All 11 projection groups are written to a single output file in
-    project_data_dir/vmaps_res{res}_min_cden{min_cden}/, so
-    image_loader.jl can read standard and octant projections without
+    project_data_dir/vmaps-res{res}-min_cden{min_cden}-bound_filter_{bf}/,
+    so image_loader.jl can read standard and octant projections without
     any changes.
 
     All viewing directions are in simulation coordinates, not
@@ -766,6 +775,16 @@ def firebox_vmap(gal_id, res, min_cden=14., queue=None):
         ('load', gal_id, None), ('proj', gal_id, n), ('done', gal_id,
         None), ('skip', gal_id, reason), and ('error', gal_id, msg).
         save_all_firebox_vmaps uses this for its progress display.
+    save: bool, default False
+        When True, write the computed maps to an HDF5 file in
+        project_data_dir/vmaps-res{res}-min_cden{min_cden}-bound_filter_{bf}/.
+        When False, return the dict without touching disk.
+    bound_filter: {'none', 'only_sats', 'all'}, default 'none'
+        Controls which particles load_particles filters to bound
+        members. 'none' loads all particles for every galaxy. 'only_sats'
+        loads only bound particles for satellites (grp_id != -1) and all
+        particles for hosts. 'all' loads only bound particles for every
+        galaxy. Case-insensitive.
 
     Returns
     -------
@@ -777,11 +796,17 @@ def firebox_vmap(gal_id, res, min_cden=14., queue=None):
 
         'vmap': np.ndarray, shape (res, res)
             Mass-weighted mean line-of-sight velocity in km/s. Pixels
-            whose column density falls below min_cden are np.nan.
+            whose column density falls below min_cden are np.nan. Row 0
+            corresponds to the highest vertical coordinate, so `imshow`
+            displays the map correctly without specifying `extent` or
+            `origin`. Pass `vert_edges` to `pcolormesh` for correct tick
+            positions.
         'horiz_edges': np.ndarray, shape (res+1,)
             Bin edges along the horizontal axis in physical kpc.
         'vert_edges': np.ndarray, shape (res+1,)
             Bin edges along the vertical axis in physical kpc.
+            vert_edges[0] is the largest (most positive) vertical
+            coordinate, matching row 0 of `vmap`.
     '''
     from . import config
     from . import firebox_io
@@ -790,11 +815,28 @@ def firebox_vmap(gal_id, res, min_cden=14., queue=None):
     import h5py
     import numpy as np
 
+    _valid_bound_filters = ('none', 'only_sats', 'all')
+    bound_filter = bound_filter.lower()
+    if bound_filter not in _valid_bound_filters:
+        _opts = ', '.join(_valid_bound_filters)
+        raise ValueError(
+            f'bound_filter must be one of {_opts}, got {bound_filter!r}'
+        )
+
+    # Load grp_ids once per process; skip reload on subsequent calls.
+    global _grp_ids_d
+    if _grp_ids_d is None:
+        _grp_ids_d = firebox_io.load_grp_ids()
+
     firebox_dir = config.config[f'{__package__}_paths']['firebox_data_dir']
     firebox_snap = config.config[f'{__package__}_paths']['firebox_snap']
     output_dir = os.path.join(
         config.config[f'{__package__}_paths']['project_data_dir'],
-        'vmaps_res{0:0.0f}_min_cden{1:0.1e}'.format(res, min_cden),
+        'vmaps-res{0:0.0f}-min_cden{1:0.1e}-bound_filter_{2}'.format(
+            res,
+            min_cden,
+            bound_filter,
+        ),
     )
     obj_path = os.path.join(
         firebox_dir,
@@ -809,15 +851,30 @@ def firebox_vmap(gal_id, res, min_cden=14., queue=None):
     if not os.path.exists(obj_path):
         if queue is not None:
             queue.put(('skip', gal_id, 'file not found'))
+        else:
+            print('File not found.')
         return None
 
     proj_i = 0
     d = {}
     try:
-        coords, vs, ms, _ = firebox_io.load_particles('gas', obj_path)
+        grp_id = _grp_ids_d.loc[gal_id, 'grp_id']
+        if bound_filter == 'none':
+            only_bound = False
+        elif bound_filter == 'only_sats':
+            only_bound = grp_id != -1
+        else:  # 'all'
+            only_bound = True
+        coords, vs, ms, _ = firebox_io.load_particles(
+            'gas',
+            obj_path,
+            only_bound=only_bound
+        )
         if len(coords) == 0:
             if queue is not None:
                 queue.put(('skip', gal_id, 'no bound gas'))
+            else:
+                print('No bound gas.')
             return None
 
         if queue is not None:
@@ -828,6 +885,8 @@ def firebox_vmap(gal_id, res, min_cden=14., queue=None):
         except KeyError:
             if queue is not None:
                 queue.put(('skip', gal_id, 'no FOV data'))
+            else:
+                print('No FOV data.')
             return None
 
         # Standard projections: (horiz_axis, vert_axis) index pairs.
@@ -838,71 +897,77 @@ def firebox_vmap(gal_id, res, min_cden=14., queue=None):
         }
         z_hat = np.array([0., 0., 1.])
 
-        os.makedirs(output_dir, exist_ok=True)
-        with h5py.File(output_path, 'w') as out_f:
-            out_f.attrs['fov']      = fov
-            out_f.attrs['min_cden'] = min_cden
-            out_f.attrs['res']      = res
+        for proj_name, (h_ax, v_ax) in standard.items():
+            in_fov = (
+                np.linalg.norm(coords[:, [h_ax, v_ax]], axis=1)
+                <= fov / 2.
+            )
+            c, v, m = coords[in_fov], vs[in_fov], ms[in_fov]
+            if len(c) == 0:
+                continue
+            vmap, horiz_edges, vert_edges = calc_vmap(
+                c, v, m, h_ax, v_ax, res, min_cden,
+            )
+            d[proj_name] = {
+                'vmap': vmap,
+                'horiz_edges': horiz_edges,
+                'vert_edges': vert_edges,
+            }
+            proj_i += 1
+            if queue is not None:
+                queue.put(('proj', gal_id, proj_i))
 
-            for proj_name, (h_ax, v_ax) in standard.items():
-                in_fov = (
-                    np.linalg.norm(coords[:, [h_ax, v_ax]], axis=1)
-                    <= fov / 2.
-                )
-                c, v, m = coords[in_fov], vs[in_fov], ms[in_fov]
-                if len(c) == 0:
-                    continue
-                vmap, horiz_edges, vert_edges = calc_vmap(
-                    c, v, m, h_ax, v_ax, res, min_cden,
-                )
-                d[proj_name] = {
-                    'vmap': vmap,
-                    'horiz_edges': horiz_edges,
-                    'vert_edges': vert_edges,
-                }
-                grp = out_f.create_group(proj_name)
-                grp.create_dataset('vmap', data=vmap)
-                grp.create_dataset('horiz_edges', data=horiz_edges)
-                grp.create_dataset('vert_edges', data=vert_edges)
-                proj_i += 1
-                if queue is not None:
-                    queue.put(('proj', gal_id, proj_i))
+        for label, n in rotate_galaxy.OCTANT_DIRECTIONS.items():
+            proj_name = f'projection_{label}'
+            R = rotate_galaxy.rotation_matrix(n, z_hat)
+            coords_rot = coords @ R.T
+            vs_rot     = vs    @ R.T
+            in_fov = (
+                np.linalg.norm(coords_rot[:, :2], axis=1)
+                <= fov / 2.
+            )
+            c, v, m = (
+                coords_rot[in_fov], vs_rot[in_fov], ms[in_fov],
+            )
+            if len(c) == 0:
+                continue
+            vmap, horiz_edges, vert_edges = calc_vmap(
+                c, v, m, 0, 1, res, min_cden,
+            )
+            d[proj_name] = {
+                'vmap': vmap,
+                'horiz_edges': horiz_edges,
+                'vert_edges': vert_edges,
+            }
+            proj_i += 1
+            if queue is not None:
+                queue.put(('proj', gal_id, proj_i))
 
-            for label, n in rotate_galaxy.OCTANT_DIRECTIONS.items():
-                proj_name = f'projection_{label}'
-                R = rotate_galaxy.rotation_matrix(n, z_hat)
-                coords_rot = coords @ R.T
-                vs_rot     = vs    @ R.T
-                in_fov = (
-                    np.linalg.norm(coords_rot[:, :2], axis=1)
-                    <= fov / 2.
-                )
-                c, v, m = (
-                    coords_rot[in_fov], vs_rot[in_fov], ms[in_fov],
-                )
-                if len(c) == 0:
-                    continue
-                vmap, horiz_edges, vert_edges = calc_vmap(
-                    c, v, m, 0, 1, res, min_cden,
-                )
-                d[proj_name] = {
-                    'vmap': vmap,
-                    'horiz_edges': horiz_edges,
-                    'vert_edges': vert_edges,
-                }
-                grp = out_f.create_group(proj_name)
-                grp.create_dataset('vmap', data=vmap)
-                grp.create_dataset('horiz_edges', data=horiz_edges)
-                grp.create_dataset('vert_edges', data=vert_edges)
-                proj_i += 1
-                if queue is not None:
-                    queue.put(('proj', gal_id, proj_i))
+        if save:
+            os.makedirs(output_dir, exist_ok=True)
+            with h5py.File(output_path, 'w') as out_f:
+                out_f.attrs['fov']      = fov
+                out_f.attrs['min_cden'] = min_cden
+                out_f.attrs['res']      = res
+                for proj_name, arrays in d.items():
+                    grp = out_f.create_group(proj_name)
+                    grp.create_dataset('vmap', data=arrays['vmap'])
+                    grp.create_dataset(
+                        'horiz_edges', data=arrays['horiz_edges'],
+                    )
+                    grp.create_dataset(
+                        'vert_edges', data=arrays['vert_edges'],
+                    )
 
     except Exception as exc:
-        if os.path.exists(output_path):
+        # Remove a partially-written file so a corrupt stub doesn't
+        # masquerade as a valid vmap on the next run.
+        if save and os.path.exists(output_path):
             os.remove(output_path)
         if queue is not None:
             queue.put(('error', gal_id, str(exc)))
+        else:
+            raise
         return None
 
     if queue is not None:
@@ -915,7 +980,7 @@ def _vmap_worker(args):
     return firebox_vmap(*args)
 
 
-def save_all_firebox_vmaps(res, min_cden=14.):
+def save_all_firebox_vmaps(res, min_cden=14., bound_filter='none'):
     '''
     Save bound-gas velocity maps for all FIREBox galaxies whose
     particle files exist in firebox_data_dir/firebox_snap (both set in
@@ -923,7 +988,7 @@ def save_all_firebox_vmaps(res, min_cden=14.):
     Each output file contains 11 projection groups: projection_xy,
     projection_yz, projection_zx, and one group per octant direction.
     The code saves files to
-    project_data_dir/vmaps_res{res}_min_cden{min_cden}.
+    project_data_dir/vmaps-res{res}-min_cden{min_cden}-bound_filter_{bf}.
 
     Parameters
     ----------
@@ -932,6 +997,9 @@ def save_all_firebox_vmaps(res, min_cden=14.):
     min_cden: float, default 14.
         Minimum column density in M_sun / pc^2 for a pixel to receive
         a numerical value; pixels below this threshold are np.nan.
+    bound_filter: {'none', 'only_sats', 'all'}, default 'none'
+        Passed directly to firebox_vmap. See that function's docstring
+        for details.
 
     Returns
     -------
@@ -951,7 +1019,7 @@ def save_all_firebox_vmaps(res, min_cden=14.):
     queue = manager.Queue()
 
     work_args = [
-        (gal_id, res, min_cden, queue)
+        (gal_id, res, min_cden, queue, True, bound_filter)
         for gal_id in gal_ids
     ]
 
@@ -1078,10 +1146,16 @@ def save_all_firebox_vmaps(res, min_cden=14.):
     return None
 
 
-def load_firebox_vmap(gal_id, res, min_cden):
+def imshow_firebox_vmap(gal_id, res, min_cden, bound_filter='none'):
     '''
     Display the bound-gas velocity map that `save_all_firebox_vmaps` generated
-    for the given galaxy.
+    for the given galaxy. This function was useful for visualizing vmaps in
+    the same orientation we'd see if we directly printed the vmap data. It
+    helped us determine that `pcolormesh` required edge argument to appear in
+    the correct orientation.
+
+    Reads from
+    project_data_dir/vmaps-res{res}-min_cden{min_cden}-bound_filter_{bf}/.
 
     Parameters
     ----------
@@ -1093,6 +1167,9 @@ def load_firebox_vmap(gal_id, res, min_cden):
         The minimum column density in M_sun / pc^2 with which
         `save_all_firebox_vmaps` generated the velocity map. That function sets
         pixels that are below the minimum density to np.nan.
+    bound_filter: {'none', 'only_sats', 'all'}, default 'none'
+        The bound_filter value used when save_all_firebox_vmaps generated
+        the file. Selects the correct output directory.
 
     Returns
     -------
@@ -1105,115 +1182,198 @@ def load_firebox_vmap(gal_id, res, min_cden):
     from matplotlib import pyplot as plt
     maps_dir = os.path.join(
         config.config[f'{__package__}_paths']['project_data_dir'],
-        'vmaps_res{0:0.0f}_min_cden{1:0.1e}'.format(res, min_cden)
+        'vmaps-res{0:0.0f}-min_cden{1:0.1e}-bound_filter_{2}'.format(
+            res,
+            min_cden,
+            bound_filter,
+        ),
     )
 
-    orientation_d = {
-        'projection_xy': {'h': 0, 'v': 1},
-        'projection_yz': {'h': 1, 'v': 2},
-        'projection_zx': {'h': 2, 'v': 0}
+    std_axis_labels = {
+        'projection_xy': {'h': '$x$', 'v': '$y$'},
+        'projection_yz': {'h': '$y$', 'v': '$z$'},
+        'projection_zx': {'h': '$z$', 'v': '$x$'},
     }
-    axes_d = {0: '$x$', 1: '$y$', 2: '$z$'}
+    _pm = {'p': '+', 'm': '-'}
 
-    fig, axs = plt.subplots(1, 3, figsize=(16, 4), sharex=True, sharey=True)
+    def _octant_label(name):
+        # name is like 'projection_ppm'; map each letter to a sign.
+        letters = name.split('_')[1]
+        signs = ''.join(_pm[c] for c in letters)
+        return '{0}x{1}y{2}z'.format(*signs)
 
     path = os.path.join(maps_dir, f'object_{gal_id}_vmap.hdf5')
+    print('Showing {0}'.format(path))
     with h5py.File(path, 'r') as f:
-        for i, (name, obj) in enumerate(f.items()):
-            if isinstance(obj, h5py.Group):
-                vmap = obj['vmap'][()]
-                horiz_edges = obj['horiz_edges'][()]
-                vert_edges = obj['vert_edges'][()]
-                
-                vmax = np.nanmax(vmap)
-                vmin = -1. * vmax
-
-                quadmesh = axs[i].pcolormesh(
-                    horiz_edges,
-                    vert_edges,
-                    vmap,
-                    cmap=plt.cm.seismic_r,
-                    vmin=vmin,
-                    vmax=vmax
-                )
-                axs[i].set_xlabel(
-                    '{0} [kpc]'.format(axes_d[orientation_d[name]['h']])
-                )
-                axs[i].set_ylabel(
-                    '{0} [kpc]'.format(axes_d[orientation_d[name]['v']])
-                )
-                axs[i].set_aspect('equal', adjustable='box')
-                fig.colorbar(
-                    quadmesh,
-                    ax=axs[i],
-                    label=r'Gas LOS Velocity [kms$^{-1}]$'
-                )
-    return None
-
-
-def imshow_firebox_vmap(gal_id, res, min_cden):
-    '''
-    Display the bound-gas velocity map that `save_all_firebox_vmaps` generated
-    for the given galaxy.
-
-    Parameters
-    ----------
-    gal_id: int
-        FIREBox galaxy unique ID
-    res: int
-        The number of pixels the velocity map has along each axis.
-    min_cden: float, default 14.
-        The minimum column density in M_sun / pc^2 with which
-        `save_all_firebox_vmaps` generated the velocity map. That function sets
-        pixels that are below the minimum density to np.nan.
-
-    Returns
-    -------
-    None
-    '''
-    from . import config
-    import os
-    import h5py
-    import numpy as np
-    from matplotlib import pyplot as plt
-    maps_dir = os.path.join(
-        config.config[f'{__package__}_paths']['project_data_dir'],
-        'vmaps_res{0:0.0f}_min_cden{1:0.1e}'.format(res, min_cden)
+        proj_names = [
+            proj_name
+            for proj_name, item in f.items()
+            if isinstance(item, h5py.Group)
+        ]
+        arrays = {
+            proj_name: {
+                'vmap': f[proj_name]['vmap'][()],
+                'horiz_edges': f[proj_name]['horiz_edges'][()],
+                'vert_edges': f[proj_name]['vert_edges'][()],
+            }
+            for proj_name in proj_names
+        }
+    n = len(proj_names)
+    ncols = min(n, 4)
+    nrows = (n + ncols - 1) // ncols
+    fig, axs = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(4 * ncols, 4 * nrows),
+        squeeze=False
     )
-
-    orientation_d = {
-        'projection_xy': {'h': 0, 'v': 1},
-        'projection_yz': {'h': 1, 'v': 2},
-        'projection_zx': {'h': 2, 'v': 0}
-    }
-    axes_d = {0: '$x$', 1: '$y$', 2: '$z$'}
-
-    fig, axs = plt.subplots(1, 3, figsize=(16, 4), sharex=True, sharey=True)
-
-    path = os.path.join(maps_dir, f'object_{gal_id}_vmap.hdf5')
-    with h5py.File(path, 'r') as f:
-        for i, (name, obj) in enumerate(f.items()):
-            if isinstance(obj, h5py.Group):
-                vmap = obj['vmap'][()]
-                horiz_edges = obj['horiz_edges'][()]
-                vert_edges = obj['vert_edges'][()]
-                
-                vmax = np.nanmax(vmap)
-                vmin = -1. * vmax
-
-                axs[i].imshow(vmap)
-                axs[i].set_xlabel(
-                    '{0} [kpc]'.format(axes_d[orientation_d[name]['h']])
-                )
-                axs[i].set_ylabel(
-                    '{0} [kpc]'.format(axes_d[orientation_d[name]['v']])
-                )
-                axs[i].set_aspect('equal', adjustable='box')
+    for ax in axs.flat:
+        ax.set_visible(False)
+    for i, proj_name in enumerate(proj_names):
+        ax = axs[i // ncols][i % ncols]
+        ax.set_visible(True)
+        vmap = arrays[proj_name]['vmap']
+        horiz_edges = arrays[proj_name]['horiz_edges']
+        vert_edges = arrays[proj_name]['vert_edges']
+        vmax = np.nanmax(np.abs(vmap))
+        extent = [
+            horiz_edges[0], horiz_edges[-1],
+            vert_edges[-1], vert_edges[0],
+        ]
+        ax.imshow(
+            vmap,
+            cmap=plt.cm.seismic_r,
+            vmin=-vmax,
+            vmax=vmax,
+            extent=extent,
+            interpolation='nearest',
+        )
+        if proj_name in std_axis_labels:
+            lbls = std_axis_labels[proj_name]
+            ax.set_xlabel('{0} [kpc]'.format(lbls['h']))
+            ax.set_ylabel('{0} [kpc]'.format(lbls['v']))
+        else:
+            ax.set_title(_octant_label(proj_name))
+        ax.set_aspect('equal', adjustable='box')
+    plt.tight_layout()
     plt.show()
     return None
 
 
-def show_firebox_vmap_live(gal_id, res, min_cden=14.):
+def load_firebox_vmap(gal_id, res, min_cden=14., bound_filter='none'):
+    '''
+    Load and display the bound-gas velocity map that `save_all_firebox_vmaps`
+    generated for the given galaxy.
+
+    Reads from
+    project_data_dir/vmaps-res{res}-min_cden{min_cden}-bound_filter_{bf}/.
+
+    Parameters
+    ----------
+    gal_id: int
+        FIREBox galaxy unique ID
+    res: int
+        The number of pixels the velocity map has along each axis.
+    min_cden: float, default 14.
+        The minimum column density in M_sun / pc^2 with which
+        `save_all_firebox_vmaps` generated the velocity map. That function
+        sets pixels that are below the minimum density to np.nan.
+    bound_filter: {'none', 'only_sats', 'all'}, default 'none'
+        The bound_filter value used when save_all_firebox_vmaps generated
+        the file. Selects the correct output directory.
+
+    Returns
+    -------
+    d: dict
+        Keys are projection names (e.g. 'projection_xy', 'projection_ppp').
+        Each value is a dict with keys 'vmap', 'horiz_edges', 'vert_edges',
+        matching the structure that `firebox_vmap` returns.
+    '''
+    from . import config
+    import os
+    import h5py
+    import numpy as np
+    from matplotlib import pyplot as plt
+    maps_dir = os.path.join(
+        config.config[f'{__package__}_paths']['project_data_dir'],
+        'vmaps-res{0:0.0f}-min_cden{1:0.1e}-bound_filter_{2}'.format(
+            res,
+            min_cden,
+            bound_filter,
+        ),
+    )
+
+    std_axis_labels = {
+        'projection_xy': {'h': '$x$', 'v': '$y$'},
+        'projection_yz': {'h': '$y$', 'v': '$z$'},
+        'projection_zx': {'h': '$z$', 'v': '$x$'},
+    }
+    _pm = {'p': '+', 'm': '-'}
+
+    def _octant_label(name):
+        letters = name.split('_')[1]
+        signs = ''.join(_pm[c] for c in letters)
+        return '{0}x{1}y{2}z'.format(*signs)
+
+    path = os.path.join(maps_dir, f'object_{gal_id}_vmap.hdf5')
+    d = {}
+    with h5py.File(path, 'r') as f:
+        proj_names = [
+            proj_name
+            for proj_name, item in f.items()
+            if isinstance(item, h5py.Group)
+        ]
+        for proj_name in proj_names:
+            grp = f[proj_name]
+            d[proj_name] = {
+                'vmap': grp['vmap'][()],
+                'horiz_edges': grp['horiz_edges'][()],
+                'vert_edges': grp['vert_edges'][()],
+            }
+    n = len(proj_names)
+    ncols = min(n, 4)
+    nrows = (n + ncols - 1) // ncols
+    fig, axs = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(4 * ncols, 4 * nrows),
+        squeeze=False
+    )
+    for ax in axs.flat:
+        ax.set_visible(False)
+    for i, proj_name in enumerate(proj_names):
+        ax = axs[i // ncols][i % ncols]
+        ax.set_visible(True)
+        vmap = d[proj_name]['vmap']
+        horiz_edges = d[proj_name]['horiz_edges']
+        vert_edges = d[proj_name]['vert_edges']
+        vmax = np.nanmax(np.abs(vmap))
+        vmin = -1. * vmax
+        quadmesh = ax.pcolormesh(
+            horiz_edges,
+            vert_edges,
+            vmap,
+            cmap=plt.cm.seismic_r,
+            vmin=vmin,
+            vmax=vmax
+        )
+        if proj_name in std_axis_labels:
+            lbls = std_axis_labels[proj_name]
+            ax.set_xlabel('{0} [kpc]'.format(lbls['h']))
+            ax.set_ylabel('{0} [kpc]'.format(lbls['v']))
+        else:
+            ax.set_title(_octant_label(proj_name))
+        ax.set_aspect('equal', adjustable='box')
+        fig.colorbar(
+            quadmesh,
+            ax=ax,
+            label=r'Gas LOS Velocity [kms$^{-1}]$'
+        )
+    plt.tight_layout()
+    return d
+
+
+def show_firebox_vmap_live(gal_id, res, min_cden=14., bound_filter='none'):
     '''
     Compute and display the bound-gas velocity map for a FIREBox galaxy
     without reading from or writing to a file.
@@ -1227,6 +1387,9 @@ def show_firebox_vmap_live(gal_id, res, min_cden=14.):
     min_cden: float, default 14.
         Minimum column density in M_sun / pc^2 for a pixel to receive a
         numerical value; pixels below this threshold are np.nan.
+    bound_filter: {'none', 'only_sats', 'all'}, default 'none'
+        Passed directly to firebox_vmap. See that function's docstring
+        for details.
 
     Returns
     -------
@@ -1235,31 +1398,43 @@ def show_firebox_vmap_live(gal_id, res, min_cden=14.):
     import numpy as np
     from matplotlib import pyplot as plt
 
-    d = firebox_vmap(gal_id, res, min_cden)
+    d = firebox_vmap(gal_id, res, min_cden, bound_filter=bound_filter)
     if d is None:
         print(f'No data for galaxy {gal_id}.')
         return None
 
-    orientation_d = {
-        'projection_xy': {'h': 0, 'v': 1},
-        'projection_yz': {'h': 1, 'v': 2},
-        'projection_zx': {'h': 2, 'v': 0},
+    std_axis_labels = {
+        'projection_xy': {'h': '$x$', 'v': '$y$'},
+        'projection_yz': {'h': '$y$', 'v': '$z$'},
+        'projection_zx': {'h': '$z$', 'v': '$x$'},
     }
-    axes_d = {0: '$x$', 1: '$y$', 2: '$z$'}
+    _pm = {'p': '+', 'm': '-'}
 
-    projections = list(d.keys())
-    n = len(projections)
-    fig, axs = plt.subplots(4, 3, figsize=(12, 16))
-    axs = axs.ravel()
-    for ax in axs[n:]:
+    def _octant_label(proj_name):
+        letters = proj_name.split('_')[1]
+        signs = ''.join(_pm[c] for c in letters)
+        return '{0}x{1}y{2}z'.format(*signs)
+
+    proj_names = list(d.keys())
+    n = len(proj_names)
+    ncols = min(n, 4)
+    nrows = (n + ncols - 1) // ncols
+    fig, axs = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(4 * ncols, 4 * nrows),
+        squeeze=False
+    )
+    for ax in axs.flat:
         ax.set_visible(False)
-
-    for i, name in enumerate(projections):
-        vmap = d[name]['vmap']
-        horiz_edges = d[name]['horiz_edges']
-        vert_edges = d[name]['vert_edges']
+    for i, proj_name in enumerate(proj_names):
+        ax = axs[i // ncols][i % ncols]
+        ax.set_visible(True)
+        vmap = d[proj_name]['vmap']
+        horiz_edges = d[proj_name]['horiz_edges']
+        vert_edges = d[proj_name]['vert_edges']
         vmax = np.nanmax(np.abs(vmap))
-        quadmesh = axs[i].pcolormesh(
+        quadmesh = ax.pcolormesh(
             horiz_edges,
             vert_edges,
             vmap,
@@ -1267,22 +1442,16 @@ def show_firebox_vmap_live(gal_id, res, min_cden=14.):
             vmin=-vmax,
             vmax=vmax,
         )
-        if name in orientation_d:
-            axs[i].set_xlabel(
-                '{0} [kpc]'.format(axes_d[orientation_d[name]['h']])
-            )
-            axs[i].set_ylabel(
-                '{0} [kpc]'.format(axes_d[orientation_d[name]['v']])
-            )
+        if proj_name in std_axis_labels:
+            lbls = std_axis_labels[proj_name]
+            ax.set_xlabel('{0} [kpc]'.format(lbls['h']))
+            ax.set_ylabel('{0} [kpc]'.format(lbls['v']))
         else:
-            axs[i].set_xlabel('kpc')
-            axs[i].set_ylabel('kpc')
-        label = name.replace('projection_', '')
-        axs[i].set_title(label)
-        axs[i].set_aspect('equal', adjustable='box')
+            ax.set_title(_octant_label(proj_name))
+        ax.set_aspect('equal', adjustable='box')
         fig.colorbar(
             quadmesh,
-            ax=axs[i],
+            ax=ax,
             label=r'Gas LOS Velocity [km s$^{-1}$]',
         )
     plt.tight_layout()
