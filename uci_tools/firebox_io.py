@@ -23,6 +23,21 @@ def load_grp_ids():
     return df
 
 
+def get_grp_id(gal_id):
+    '''
+    Parameters
+    ----------
+    gal_id: int
+        galaxy of interest
+
+    Returns
+    -------
+    grp_id: int
+        Group ID of the gal. Hosts are -1.
+    '''
+    df = load_grp_ids()
+    return df.loc[gal_id, 'grp_id']
+
 def find_gal_in_direc(gal_id, direc):
     all_files = np.array(
         [f 
@@ -65,44 +80,54 @@ def show_gal(gal_id, scaling='std_asinh'):
         )
 
     path = get_gal_path(gal_id)
+    fov = get_fov(gal_id)
+    half_fov = fov / 2.
 
+    proj_imgs = {}
     with h5py.File(path, 'r') as f:
-        image_xy = np.array(f['projection_xy']['band_g'])
-        image_yz = np.array(f['projection_yz']['band_g'])
-        image_zx = np.array(f['projection_zx']['band_g'])
+        proj_imgs['projection_xy'] = np.array(
+            f['projection_xy']['band_g']
+        )
+        proj_imgs['projection_yz'] = np.array(
+            f['projection_yz']['band_g']
+        )
+        proj_imgs['projection_zx'] = np.array(
+            f['projection_zx']['band_g']
+        )
 
     octant_img_dir = config.config.get(
         f'{__package__}_paths',
         'octant_img_dir'
     )
     octant_path = find_gal_in_direc(gal_id, octant_img_dir)
-    octant_imgs = {}
-    with h5py.File(octant_path, 'r') as f:
-        for proj in f.keys():
-            octant_imgs[proj] = f[proj]['band_g'][:]
-    imgs = [
-        image_xy,
-        image_yz,
-        image_zx,
-        *[octant_imgs[proj] for proj in octant_imgs]
-    ]
+    if octant_path != 0:
+        with h5py.File(octant_path, 'r') as f:
+            for proj in f.keys():
+                proj_imgs[proj] = f[proj]['band_g'][:]
 
-    fig, axs = plt.subplots(4, 3, figsize=(12, 12))
-    axs = axs.ravel()
-    fig.subplots_adjust(wspace=0.01)
+    proj_names = list(proj_imgs.keys())
+    imgs = [proj_imgs[name] for name in proj_names]
+
     if scaling == 'std_asinh':
-        for i in range(len(imgs)):
-            imgs[i] = tools.std_asinh(
-                imgs[i][np.newaxis, np.newaxis],
+        imgs = [
+            tools.std_asinh(
+                img[np.newaxis, np.newaxis],
                 stretch=1.e-5,
                 means=[0.6394],
                 stds=[1.2695]
             ).squeeze()
-    for image, ax in zip(imgs, axs):
+            for img in imgs
+        ]
+
+    fig, axs = plt.subplots(4, 3, figsize=(12, 14))
+    axs = axs.ravel()
+    extent = (-half_fov, half_fov, -half_fov, half_fov)
+    for image, proj_name, ax in zip(imgs, proj_names, axs):
         if scaling == 'std_asinh':
             ax.imshow(
                 image,
-                cmap='gray'
+                cmap='gray',
+                extent=extent,
             )
         else:
             ax.imshow(
@@ -113,13 +138,16 @@ def show_gal(gal_id, scaling='std_asinh'):
                     vmin=5.e5,
                     vmax=1.e8
                 ),
+                extent=extent,
             )
-        ax.set_xticks([])
-        ax.set_yticks([])
+        ax.set_title(proj_name.removeprefix('projection_'))
+        ax.set_xlabel('kpc')
+        ax.set_ylabel('kpc')
         ax.set_facecolor('k')
         ax.set_aspect('equal')
     for ax in axs[len(imgs):]:
         ax.set_visible(False)
+    fig.tight_layout()
     plt.show()
 
     return None

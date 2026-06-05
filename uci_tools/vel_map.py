@@ -1457,3 +1457,213 @@ def show_firebox_vmap_live(gal_id, res, min_cden=14., bound_filter='none'):
     plt.tight_layout()
     plt.show()
     return None
+
+
+def firebox_gas_density_map(
+        gal_id,
+        res,
+        bound_filter='none',
+        fov_override=None):
+    '''
+    Compute and display the gas surface mass density for a FIREBox
+    galaxy in all 11 projections (xy, yz, zx, plus the 8 octant
+    body-diagonal directions) without reading from or writing to a
+    file.
+
+    All projections share the same square field of view (set by
+    firebox_io.get_fov) and the same bin size, so density values are
+    directly comparable across orientations. A shared log colorbar
+    normalizes every subplot to the global min and max of nonzero
+    pixels.
+
+    Parameters
+    ----------
+    gal_id: int
+        FIREBox galaxy unique ID.
+    res: int
+        Number of pixels along each axis of each density map.
+    bound_filter: {'none', 'only_sats', 'all'}, default 'none'
+        Controls which particles firebox_io.load_particles filters to
+        bound members. 'none' loads all particles for every galaxy.
+        'only_sats' loads only bound particles for satellites
+        (grp_id != -1) and all particles for hosts. 'all' loads only
+        bound particles for every galaxy.
+    fov_override: float, default None
+        The field of view to capture in the gas map.
+
+    Returns
+    -------
+    None
+    '''
+    from . import config
+    from . import firebox_io
+    from . import rotate_galaxy
+    import os
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import matplotlib.colors
+
+    _valid_bound_filters = ('none', 'only_sats', 'all')
+    bound_filter = bound_filter.lower()
+    if bound_filter not in _valid_bound_filters:
+        _opts = ', '.join(_valid_bound_filters)
+        raise ValueError(
+            f'bound_filter must be one of {_opts}, '
+            f'got {bound_filter!r}'
+        )
+
+    global _grp_ids_d
+    if _grp_ids_d is None:
+        _grp_ids_d = firebox_io.load_grp_ids()
+
+    paths = config.config[f'{__package__}_paths']
+    obj_path = os.path.join(
+        paths['firebox_data_dir'],
+        paths['firebox_snap'],
+        f'particles_within_Rvir_object_{gal_id}.hdf5',
+    )
+    if not os.path.exists(obj_path):
+        print(f'File not found: {obj_path}')
+        return None
+
+    grp_id = _grp_ids_d.loc[gal_id, 'grp_id']
+    if bound_filter == 'none':
+        only_bound = False
+    elif bound_filter == 'only_sats':
+        only_bound = grp_id != -1
+    else:
+        only_bound = True
+    coords, _, ms, _ = firebox_io.load_particles(
+        'gas',
+        obj_path,
+        only_bound=only_bound,
+    )
+    if len(coords) == 0:
+        print(f'No gas particles for galaxy {gal_id}.')
+        return None
+    if fov_override is not None:
+        fov = fov_override
+    else:
+        try:
+            fov = firebox_io.get_fov(gal_id)
+        except KeyError:
+            print(f'No FOV data for galaxy {gal_id}.')
+            return None
+    half = fov / 2.
+    bin_area_kpc2 = (fov / res) ** 2
+    # Converts mass in 1e10 M_sun summed into a (kpc/res)^2 pixel into
+    # surface mass density in M_sun / pc^2.
+    density_factor = 1.e10 / bin_area_kpc2 / 1.e3 / 1.e3
+    z_hat = np.array([0., 0., 1.])
+
+    standard = {
+        'projection_xy': (0, 1),
+        'projection_yz': (1, 2),
+        'projection_zx': (2, 0),
+    }
+    proj_names = list(standard.keys()) + [
+        f'projection_{label}'
+        for label in rotate_galaxy.OCTANT_DIRECTIONS
+    ]
+
+    def _density(c, m, h_ax, v_ax):
+        mass_map, h_edges, v_edges = np.histogram2d(
+            c[:, h_ax],
+            c[:, v_ax],
+            bins=res,
+            range=[[-half, half], [-half, half]],
+            weights=m,
+        )
+        # histogram2d returns mass_map[h_bin, v_bin]; pcolormesh expects
+        # C[row, col] = C[v_bin, h_bin], so transpose before returning.
+        return mass_map.T * density_factor, h_edges, v_edges
+
+    cden_maps = {}
+    for proj_name, (h_ax, v_ax) in standard.items():
+        in_fov = (
+            np.linalg.norm(coords[:, [h_ax, v_ax]], axis=1)
+            <= half
+        )
+        cden_maps[proj_name] = _density(
+            coords[in_fov], ms[in_fov], h_ax, v_ax,
+        )
+    for label, n_dir in rotate_galaxy.OCTANT_DIRECTIONS.items():
+        proj_name = f'projection_{label}'
+        R = rotate_galaxy.rotation_matrix(n_dir, z_hat)
+        rotated = coords @ R.T
+        in_fov = np.linalg.norm(rotated[:, :2], axis=1) <= half
+        cden_maps[proj_name] = _density(
+            rotated[in_fov], ms[in_fov], 0, 1,
+        )
+
+    # Use one shared log color scale across projections so a viewer
+    # can compare densities directly between orientations.
+    nonzero = np.concatenate([
+        cden[cden > 0].ravel()
+        for cden, _, _ in cden_maps.values()
+    ])
+    if nonzero.size == 0:
+        print(
+            f'Galaxy {gal_id} has zero gas in every FOV projection.'
+        )
+        return None
+    norm = matplotlib.colors.LogNorm(
+        vmin=nonzero.min(),
+        vmax=nonzero.max(),
+    )
+
+    std_axis_labels = {
+        'projection_xy': {'h': '$x$', 'v': '$y$'},
+        'projection_yz': {'h': '$y$', 'v': '$z$'},
+        'projection_zx': {'h': '$z$', 'v': '$x$'},
+    }
+    _pm = {'p': '+', 'm': '-'}
+
+    def _octant_label(proj_name):
+        letters = proj_name.split('_')[1]
+        signs = ''.join(_pm[c] for c in letters)
+        return '{0}x{1}y{2}z'.format(*signs)
+
+    n = len(proj_names)
+    ncols = 4
+    nrows = (n + ncols - 1) // ncols
+    fig, axs = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(4 * ncols, 4 * nrows),
+        squeeze=False,
+    )
+    for ax in axs.flat:
+        ax.set_visible(False)
+    for i, proj_name in enumerate(proj_names):
+        ax = axs[i // ncols][i % ncols]
+        ax.set_visible(True)
+        cden_map, h_edges, v_edges = cden_maps[proj_name]
+        # Mask zero pixels so LogNorm renders them as the colormap's
+        # `bad` color over the black facecolor.
+        plot_map = np.ma.masked_less_equal(cden_map, 0.)
+        quadmesh = ax.pcolormesh(
+            h_edges,
+            v_edges,
+            plot_map,
+            cmap=plt.cm.magma,
+            norm=norm,
+        )
+        if proj_name in std_axis_labels:
+            lbls = std_axis_labels[proj_name]
+            ax.set_xlabel('{0} [kpc]'.format(lbls['h']))
+            ax.set_ylabel('{0} [kpc]'.format(lbls['v']))
+        else:
+            ax.set_title(_octant_label(proj_name))
+            ax.set_xlabel('kpc')
+            ax.set_ylabel('kpc')
+        ax.set_facecolor('k')
+        ax.set_aspect('equal', adjustable='box')
+        fig.colorbar(
+            quadmesh,
+            ax=ax,
+            label=r'Gas $\Sigma$ [M$_{\odot}$ pc$^{-2}$]',
+        )
+    plt.tight_layout()
+    plt.show()
+    return None
