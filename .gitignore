@@ -164,3 +164,6 @@ cython_debug/
 UCI_tools/.vscode/settings.json
 Manifest.toml
 uci_tools/_version.py
+
+# ignore commit message scratch files
+commit.txt
