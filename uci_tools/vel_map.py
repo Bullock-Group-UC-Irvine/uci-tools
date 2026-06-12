@@ -1152,7 +1152,16 @@ def imshow_firebox_vmap(gal_id, res, min_cden, bound_filter='none'):
     for the given galaxy. This function was useful for visualizing vmaps in
     the same orientation we'd see if we directly printed the vmap data. It
     helped us determine that `pcolormesh` required edge argument to appear in
-    the correct orientation.
+    the correct orientation. Because `imshow` renders `vmap[0, 0]` at the
+    top-left by default, it shows the array in memory order, which makes
+    orientation bugs easy to spot.
+
+    Prefer `load_firebox_vmap` for analysis or presentation. That function
+    uses `pcolormesh` with explicit per-cell edge arrays, so each cell maps
+    precisely to its coordinate range. `imshow` with `extent` assumes a
+    uniform grid and maps only the four corners, so tick positions are only
+    approximate. If the grid is ever non-uniform, `imshow` will be silently
+    wrong.
 
     Reads from
     project_data_dir/vmaps-res{res}-min_cden{min_cden}-bound_filter_{bf}/.
@@ -1263,7 +1272,11 @@ def imshow_firebox_vmap(gal_id, res, min_cden, bound_filter='none'):
 def load_firebox_vmap(gal_id, res, min_cden=14., bound_filter='none'):
     '''
     Load and display the bound-gas velocity map that `save_all_firebox_vmaps`
-    generated for the given galaxy.
+    generated for the given galaxy. Uses `pcolormesh` with explicit per-cell
+    edge arrays, so each cell maps precisely to its coordinate range. Prefer
+    this over `imshow_firebox_vmap` for analysis or presentation; `imshow`
+    with `extent` assumes a uniform grid and maps only the four corners, so
+    tick positions are only approximate.
 
     Reads from
     project_data_dir/vmaps-res{res}-min_cden{min_cden}-bound_filter_{bf}/.
