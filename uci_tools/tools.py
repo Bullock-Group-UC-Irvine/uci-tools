@@ -609,5 +609,5 @@ def std_asinh(X, stretch=1.e-5, return_distrib=False, means=None, stds=None):
     '''
 
     import numpy as np
-    X = np.asinh(stretch * X)
+    X = np.arcsinh(stretch * X)
     return standardize(X, return_distrib, means, stds)
