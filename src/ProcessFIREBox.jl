@@ -267,13 +267,13 @@ function get_avg_sfrs(ids, grp_ids, age; only_bound=false)
     return idf
 end
 
-function get_all_avg_sfrs(age; save=false, debug_mode=false)
+function get_all_avg_sfrs(age; save=false, debug_mode=false, only_bound=false)
     gal_ids, grp_ids = firebox_io.get_both()
     if debug_mode
         gal_ids = gal_ids[1:5]
         grp_ids = grp_ids[1:5]
     end
-    sfr_df = get_avg_sfrs(gal_ids, grp_ids, age, only_bound=false)
+    sfr_df = get_avg_sfrs(gal_ids, grp_ids, age, only_bound=only_bound)
     if save
         CSV.write(
             joinpath(
