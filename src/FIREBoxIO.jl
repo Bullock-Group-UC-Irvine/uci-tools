@@ -1,4 +1,4 @@
-module firebox_io 
+module FIREBoxIO
 
 using HDF5
 import PyCall
@@ -182,4 +182,4 @@ function summarize_gals(;save=false)
     return idf
 end
 
-end # module firebox_io 
+end # module FIREBoxIO

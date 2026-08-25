@@ -3,8 +3,8 @@ module UCITools
 include("UCIToolsConfig.jl")
 using .UCIToolsConfig
 
-include("firebox_io.jl")
-using .firebox_io
+include("FIREBoxIO.jl")
+using .FIREBoxIO
 
 include("ProcessFIREBox.jl")
 using .ProcessFIREBox

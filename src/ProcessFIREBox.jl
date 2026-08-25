@@ -9,7 +9,7 @@ import ProgressBars
 import CSV
 import IndexedDataFrames
 import Statistics
-import ..firebox_io
+import ..FIREBoxIO
 import ..UCIToolsConfig
 
 ENV["GKSwstype"] = "100"
@@ -71,7 +71,7 @@ function get_sfrs(
             end
             if Int(grp_id) != -1 && only_bound
                 # If the galaxy is not a host, filter for only bound particles.
-                bound_ids = firebox_io.get_bound_particles(gal_id)
+                bound_ids = FIREBoxIO.get_bound_particles(gal_id)
                 # Narrow down the bound gas IDs so the `in.` below is faster.
                 bound_gas_ids = intersect(gas_ids, bound_ids)
                 is_bound = in.(gas_ids, Ref(Set(bound_gas_ids)))
@@ -145,7 +145,7 @@ function get_sfrs(
 end
 
 function get_all_sfrs(;save=false)
-    gal_ids, grp_ids = firebox_io.get_both()
+    gal_ids, grp_ids = FIREBoxIO.get_both()
     sfr_df = get_sfrs(gal_ids, grp_ids, make_plots=false, only_bound=false)
     if save
         CSV.write(
@@ -157,7 +157,7 @@ function get_all_sfrs(;save=false)
 end
 
 function compare_sats_b4_filtering()
-    gal_ids, grp_ids = firebox_io.get_sats()
+    gal_ids, grp_ids = FIREBoxIO.get_sats()
     sfr_df = get_sfrs(
         gal_ids,
         grp_ids,
@@ -232,7 +232,7 @@ function get_avg_sfrs(ids, grp_ids, age; only_bound=false)
 
             if Int(grp_id) != -1 && only_bound
                 # If the galaxy is not a host, filter for only bound particles.
-                bound_ids = firebox_io.get_bound_particles(gal_id)
+                bound_ids = FIREBoxIO.get_bound_particles(gal_id)
                 # Narrow down the bound IDs so the `in.` below is faster.
                 bound_stellar_ids = intersect(stellar_ids, bound_ids)
                 is_bound = in.(stellar_ids, Ref(Set(bound_stellar_ids)))
@@ -268,7 +268,7 @@ function get_avg_sfrs(ids, grp_ids, age; only_bound=false)
 end
 
 function get_all_avg_sfrs(age; save=false, debug_mode=false, only_bound=false)
-    gal_ids, grp_ids = firebox_io.get_both()
+    gal_ids, grp_ids = FIREBoxIO.get_both()
     if debug_mode
         gal_ids = gal_ids[1:5]
         grp_ids = grp_ids[1:5]
@@ -318,7 +318,7 @@ function get_gas_mass_by_temp(id)
 end
 
 function get_all_gas_mass_by_temp(; save=false, debug_mode=false)
-    ids, grp_ids = firebox_io.get_both(only_files=true)
+    ids, grp_ids = FIREBoxIO.get_both(only_files=true)
     if debug_mode
         ids = ids[1:5]
         grp_ids = grp_ids[1:5]
