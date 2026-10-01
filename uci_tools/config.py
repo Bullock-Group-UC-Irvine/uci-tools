@@ -85,7 +85,7 @@ def ensure_user_config():
         )
         print(f'firebox_data_dir added to {__package__}_paths')
 
-    ensure_key(config, 'firebox_snap', 'objects_1200_original')
+    ensure_key(config, 'firebox_snap', '1200')
 
     if not config.has_option(f'{__package__}_paths', 'host_2d_shapes'): 
         config.set(

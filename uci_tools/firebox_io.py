@@ -276,8 +276,8 @@ def get_bound_particles(gal_id):
     firebox_snap = config.config.get(f'{__package__}_paths', 'firebox_snap')
     path = os.path.join(
         super_dir,
-        firebox_snap,
-        f"bound_particle_filters_object_{str(gal_id)}.hdf5"
+        'objects_' + firebox_snap,
+        f"bound_particle_filters_object_{str(gal_id)}.hdf5",
     )
     with h5py.File(path, 'r') as f:
         particle_ids = np.array(f['particleIDs'], int)

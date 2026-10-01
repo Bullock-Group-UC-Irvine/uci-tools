@@ -88,7 +88,7 @@ function get_both(; only_files=true)
                 ".hdf5"
             for id in gal_ids
         ]
-        direc = joinpath(super_direc, firebox_snap)
+        direc = joinpath(super_direc, "objects_" * firebox_snap)
         println("Getting list of existing files.")
         #existing_files = filter(
         #    f -> isfile(joinpath(direc, f)) && endswith(f, ".hdf5"), 
@@ -108,8 +108,8 @@ end
 function get_bound_particles(id)
     path = joinpath(
         super_direc,
-        firebox_snap,
-        "bound_particle_filters_object_" * string(id) * ".hdf5"
+        "objects_" * firebox_snap,
+        "bound_particle_filters_object_" * string(id) * ".hdf5",
     )
     particle_ids = HDF5.h5open(path, "r") do file
         particle_ids = Int.(read(file, "particleIDs"))
@@ -135,8 +135,8 @@ function summarize_gals(;save=false)
         id_str = string(gal_id)
         fname = joinpath(
             super_direc,
-            firebox_snap,
-            "particles_within_Rvir_object_" * id_str * ".hdf5"
+            "objects_" * firebox_snap,
+            "particles_within_Rvir_object_" * id_str * ".hdf5",
         )
         if isfile(fname)
             h5open(
