@@ -840,7 +840,7 @@ def firebox_vmap(
     )
     obj_path = os.path.join(
         firebox_dir,
-        firebox_snap,
+        'objects_' + firebox_snap,
         f'particles_within_Rvir_object_{gal_id}.hdf5',
     )
     output_path = os.path.join(
@@ -1532,7 +1532,7 @@ def firebox_gas_density_map(
     paths = config.config[f'{__package__}_paths']
     obj_path = os.path.join(
         paths['firebox_data_dir'],
-        paths['firebox_snap'],
+        'objects_' + paths['firebox_snap'],
         f'particles_within_Rvir_object_{gal_id}.hdf5',
     )
     if not os.path.exists(obj_path):

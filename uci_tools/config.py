@@ -108,7 +108,7 @@ def _ensure_user_config_locked(config_path):
         changed = True
         print(f'firebox_data_dir added to {__package__}_paths')
 
-    if ensure_key(config, 'firebox_snap', 'objects_1200_original'):
+    if ensure_key(config, 'firebox_snap', '1200'):
         changed = True
 
     if not config.has_option(f'{__package__}_paths', 'host_2d_shapes'):

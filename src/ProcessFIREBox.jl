@@ -50,8 +50,8 @@ function get_sfrs(
         end
         fname = joinpath(
             firebox_dir,
-            firebox_snap,
-            "particles_within_Rvir_object_" * id_str * ".hdf5"
+            "objects_" * firebox_snap,
+            "particles_within_Rvir_object_" * id_str * ".hdf5",
         )
         if isfile(fname)
             sfrs, gas_masses, Mstar, snap_time, gas_ids = HDF5.h5open(
@@ -193,8 +193,8 @@ function get_avg_sfrs(ids, grp_ids, age; only_bound=false)
         id_str = string(gal_id)
         path = joinpath(
             firebox_dir,
-            firebox_snap,
-            "particles_within_Rvir_object_" * id_str * ".hdf5"
+            "objects_" * firebox_snap,
+            "particles_within_Rvir_object_" * id_str * ".hdf5",
         )
         if isfile(path)
             file_contents = HDF5.h5open(path, "r") do file
@@ -290,7 +290,11 @@ function get_gas_mass_by_temp(id)
     uci = PyCall.pyimport("uci_tools")
 
     fname = "particles_within_Rvir_object_" * string(id) * ".hdf5"
-    path = joinpath(firebox_dir, firebox_snap, fname)
+    path = joinpath(
+        firebox_dir,
+        "objects_" * firebox_snap,
+        fname,
+    )
     (
         gas_masses,
         he_fracs,
