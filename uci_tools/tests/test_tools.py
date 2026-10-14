@@ -99,7 +99,8 @@ class TestVelMap(unittest.TestCase):
             res=100,
             min_gas_cden=0.,
             min_stars_cden=0.,
-            save_plot=True
+            save_plot=True,
+            show_plot=False
         )
         gas_map, young_star_map = vel_map_output[:2]
         with h5py.File(
