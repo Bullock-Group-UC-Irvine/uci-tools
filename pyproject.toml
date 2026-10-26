@@ -37,7 +37,6 @@ uci-tools-refactor = "uci_tools.refactor:main"
 where = ["."]
 
 [tool.setuptools_scm]
-version_file = "uci_tools/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["uci_tools/tests"]

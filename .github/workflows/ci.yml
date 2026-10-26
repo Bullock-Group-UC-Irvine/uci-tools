@@ -3,10 +3,8 @@ name: CI
 on: [push]
 
 jobs:
-  build-linux:
+  ci:
     runs-on: ubuntu-latest
-    strategy:
-      max-parallel: 5
 
     steps:
     - uses: actions/checkout@v3

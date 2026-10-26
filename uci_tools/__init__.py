@@ -9,9 +9,10 @@ from . import (
     config,
 )
 
+import importlib.metadata
 try:
-    from ._version import __version__
-except ImportError:
+    __version__ = importlib.metadata.version('uci_tools')
+except importlib.metadata.PackageNotFoundError:
     __version__ = 'unknown'
 
 # List the modules and objects you want to make available when using wildcard 
