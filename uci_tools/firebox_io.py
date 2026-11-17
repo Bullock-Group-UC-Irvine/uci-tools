@@ -183,6 +183,7 @@ def get_fov(gal_id):
 # prefix and the partTypes integer used in the ahf bound-filter file.
 _PARTICLE_INFO = {
     'gas':     {'prefix': 'gas',      'part_type': 0},
+    'dm':      {'prefix': 'dm',       'part_type': 1},
     'stellar': {'prefix': 'stellar',  'part_type': 4},
 }
 
@@ -198,7 +199,7 @@ def load_particles(particle_type, obj_path, only_bound=False):
 
     Parameters
     ----------
-    particle_type: str, {'gas', 'stellar'}
+    particle_type: str, {'gas', 'dm', 'stellar'}
         The type of particles to load.
     obj_path: str
         Path to a particles_within_Rvir HDF5 file.
@@ -265,6 +266,38 @@ def load_particles(particle_type, obj_path, only_bound=False):
     vs     = np.column_stack([vxs, vys, vzs])
     ms     = ms_raw / h
     return coords, vs, ms, ids
+
+
+def get_particle_path(gal_id):
+    '''
+    Build the path to a galaxy's within-Rvir particle file.
+
+    Parameters
+    ----------
+    gal_id: int
+        The galaxy whose particle file to locate.
+
+    Returns
+    -------
+    path: str
+        Path to the particles_within_Rvir_object_<gal_id>.hdf5 file for
+        the configured firebox_data_dir and snapshot. The file is not
+        guaranteed to exist; the caller checks.
+    '''
+    from . import config
+    super_dir = config.config.get(
+        f'{__package__}_paths',
+        'firebox_data_dir',
+    )
+    firebox_snap = config.config.get(
+        f'{__package__}_paths',
+        'firebox_snap',
+    )
+    return os.path.join(
+        super_dir,
+        'objects_' + firebox_snap,
+        f'particles_within_Rvir_object_{gal_id}.hdf5',
+    )
 
 
 def get_bound_particles(gal_id):

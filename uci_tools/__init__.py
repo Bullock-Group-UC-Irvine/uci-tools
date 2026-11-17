@@ -6,6 +6,7 @@ from . import (
     vel_map,
     fire_tools,
     firebox_io,
+    process_firebox,
     config,
 )
 
@@ -25,4 +26,5 @@ __all__ = [
     'vel_map',
     'fire_tools',
     'firebox_io',
+    'process_firebox',
 ]
